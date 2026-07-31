@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import tcod.console
 
 if TYPE_CHECKING:
-    from example_files.engine import Engine
+    from an_example.ex_engine import Engine
 
 FLOOR_VISIBLE, FLOOR_EXPLORED = (200, 180, 50), (60, 55, 20)
 WALL_VISIBLE, WALL_EXPLORED = (130, 110, 50), (40, 35, 20)

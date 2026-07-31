@@ -13,8 +13,8 @@ import tcod.path
 # Only imported for type hints, not at runtime -- avoids circular imports with entity.py
 # and game_map.py, which likely import this module too.
 if TYPE_CHECKING:
-    from example_files.entity import Entity
-    from example_files.game_map import GameMap
+    from an_example.ex_entity import Entity
+    from an_example.ex_game_map import GameMap
 
 
 class HostileAI:

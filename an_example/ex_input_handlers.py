@@ -11,7 +11,7 @@ from typing import Any
 
 import tcod.event
 
-from engine import GameState
+from ex_engine import GameState
 
 MOVE_KEYS = {
     tcod.event.KeySym.UP: (0, -1),

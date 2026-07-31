@@ -12,8 +12,8 @@ import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from example_files.components.ai import HostileAI
-    from example_files.components.fighter import Fighter
+    from an_example.ex_components.xai import HostileAI
+    from an_example.ex_components.xfighter import Fighter
 
 
 class Entity:

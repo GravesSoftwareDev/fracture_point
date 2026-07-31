@@ -11,8 +11,8 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from example_files.entity import Entity
-    from example_files.game_map import GameMap
+    from an_example.ex_entity import Entity
+    from an_example.ex_game_map import GameMap
 
 MESSAGE_LOG_LINES = 5
 

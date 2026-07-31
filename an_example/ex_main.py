@@ -1,25 +1,28 @@
 #!/usr/bin/env python
 """
-Run with: python main.py  (from inside this directory)
+Run with: python ex_main.py  (from inside this directory)
 """
 import random
+from pathlib import Path
 
 import tcod.console
 import tcod.context
 import tcod.event
+import tcod.tileset
 
-import render_functions
-from components.ai import HostileAI
-from components.fighter import Fighter
-from engine import Engine
-from entity import Entity
-from game_map import generate_map
-from input_handlers import dispatch
+import ex_render_functions as render_functions
+from ex_components.xai import HostileAI
+from ex_components.xfighter import Fighter
+from ex_engine import Engine
+from ex_entity import Entity
+from ex_game_map import generate_map
+from ex_input_handlers import dispatch
 import time
 
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 60, 30
 MAP_WIDTH, MAP_HEIGHT = 80, 45
+TILESET_PATH = Path(__file__).resolve().parent.parent / "assets" / "IBM_Plex_Mono" / "IBMPlexMono-Bold.ttf"
 
 def main() -> None:
     seed = int(time.time())
@@ -42,8 +45,12 @@ def main() -> None:
     engine.log("You descend into the dungeon.")
 
     console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT + 6, order="F")
+    tileset = tcod.tileset.load_truetype_font(TILESET_PATH, 12, 16)
 
-    with tcod.context.new(columns=console.width, rows=console.height, title="roguelike: phase 1 skeleton") as context:
+    with tcod.context.new(
+        columns=console.width, rows=console.height, tileset=tileset,
+        title="roguelike: phase 1 skeleton",
+    ) as context:
         while True:
             console.clear()
             camera_x, camera_y = render_functions.camera_offset(
