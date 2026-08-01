@@ -10,17 +10,16 @@ class GameMap:
     Indexed as tiles[x, y] to match how we address entities (x, y).
     """
 
-    def __init__(self, width: int, height: int):
+    def __init__(self, width: int, height: int, fill_value: bool = True):
         self.width = width
         self.height = height
-        self.tiles = np.full((width, height), fill_value=True, dtype=bool)
+        self.tiles = np.full((width, height), fill_value=fill_value, dtype=bool)
         self.entities: list[Entity] = []
-
-        # Wall off the border so nothing can walk off the map.
-        self.tiles[0, :] = False
-        self.tiles[width - 1, :] = False
-        self.tiles[:, 0] = False
-        self.tiles[:, height - 1] = False
+        if fill_value:
+            self.tiles[0, :] = False
+            self.tiles[width - 1, :] = False
+            self.tiles[:, 0] = False
+            self.tiles[:, height - 1] = False
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height
