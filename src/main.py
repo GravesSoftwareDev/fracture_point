@@ -19,8 +19,13 @@ def main() -> None:
 
     game_map = GameMap(SCREEN_WIDTH, SCREEN_HEIGHT)
     player = Entity(x=SCREEN_WIDTH // 2, y=SCREEN_HEIGHT // 2, char="@", color=(255, 255, 255), name="Player")
-    engine = Engine(game_map=game_map, player=player)
+    enemy = Entity(x=SCREEN_WIDTH // 2 + 5, y=SCREEN_HEIGHT // 2, char="r", color=(255, 80, 80), name="Rat", blocks_movement=True)
 
+    game_map.entities.append(player)
+    game_map.entities.append(enemy)
+
+    engine = Engine(game_map=game_map, player=player)
+    
     with tcod.context.new(
         columns=SCREEN_WIDTH,
         rows=SCREEN_HEIGHT,

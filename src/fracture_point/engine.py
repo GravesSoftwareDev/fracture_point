@@ -1,10 +1,10 @@
+import random
+
 import tcod
 
 from fracture_point.entity import Entity
 from fracture_point.game_map import GameMap
 
-# Move keys -> (dx, dy). Arrow keys plus WASD for now; we can expand
-# this later (vi keys, rebinding, etc.) once input handling needs it.
 MOVE_KEYS = {
     tcod.event.KeySym.UP: (0, -1),
     tcod.event.KeySym.DOWN: (0, 1),
@@ -30,25 +30,50 @@ class Engine:
             if isinstance(event, tcod.event.KeyDown):
                 if event.sym in MOVE_KEYS:
                     dx, dy = MOVE_KEYS[event.sym]
-                    self.try_move_player(dx, dy)
+                    took_turn = self.try_move_player(dx, dy)
 
-    def try_move_player(self, dx: int, dy: int) -> None:
+                    # This is the core turn structure: the player's action
+                    # only "counts" as a turn if it actually did something.
+                    # Bumping into a wall shouldn't let enemies act for free.
+                    if took_turn:
+                        self.process_enemy_turns()
+
+    def try_move_player(self, dx: int, dy: int) -> bool:
         dest_x = self.player.x + dx
         dest_y = self.player.y + dy
 
         if self.game_map.is_walkable(dest_x, dest_y):
             self.player.move(dx, dy)
-        # If it's not walkable, we just do nothing for now.
-        # This is where a "bump into wall" message/sound would go later.
+            return True
+
+        return False
+        # Bumping a wall does nothing for now. Bumping an enemy will
+        # become an attack once combat exists (next step or two).
+
+    def process_enemy_turns(self) -> None:
+        """Give every non-player entity a turn.
+
+        Right now this just wanders enemies randomly, purely to prove
+        the turn cadence works. Real enemy AI (chasing, attacking) comes
+        once we have combat and stats in place.
+        """
+        for entity in self.game_map.entities:
+            if entity is self.player:
+                continue
+
+            dx, dy = random.choice(list(MOVE_KEYS.values()))
+            dest_x, dest_y = entity.x + dx, entity.y + dy
+
+            if (dx, dy) != (0, 0) and self.game_map.is_walkable(dest_x, dest_y):
+                entity.move(dx, dy)
 
     def render(self, console: tcod.console.Console) -> None:
         console.clear()
 
-        # Draw the map: '#' for wall, '.' for floor.
         for x in range(self.game_map.width):
             for y in range(self.game_map.height):
                 char = "." if self.game_map.tiles[x, y] else "#"
                 console.print(x=x, y=y, text=char, fg=(90, 90, 90))
 
-        # Draw the player on top.
-        console.print(x=self.player.x, y=self.player.y, text=self.player.char, fg=self.player.color)
+        for entity in self.game_map.entities:
+            console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
