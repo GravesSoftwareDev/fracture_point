@@ -4,7 +4,7 @@ import tcod
 from fracture_point.dungeon_generator import generate_dungeon
 from fracture_point.entity import Entity
 from fracture_point.fighter import Fighter
-from fracture_point.game_map import GameMap
+from fracture_point.stats import Stats
 from fracture_point.engine import Engine
 
 ASSETS_DIR = Path("assets")
@@ -14,7 +14,7 @@ MAP_WIDTH = 60
 MAP_HEIGHT = 45
 SIDEBAR_WIDTH = 24
 
-SCREEN_WIDTH = MAP_WIDTH + 1 + SIDEBAR_WIDTH  # +1 for the border column
+SCREEN_WIDTH = MAP_WIDTH + 1 + SIDEBAR_WIDTH
 SCREEN_HEIGHT = MAP_HEIGHT
 
 TILE_WIDTH = 10
@@ -32,9 +32,11 @@ def main() -> None:
     player = Entity(
         x=player_x, y=player_y,
         char="@", color=(255, 255, 255), name="Player", blocks_movement=True,
-        fighter=Fighter(max_hp=20, power=4, defense=1),
+        fighter=Fighter(
+            stats=Stats(strength=14, dexterity=12, intelligence=10, vitality=14, wisdom=10, luck=10),
+            base_power=3, base_defense=1, base_max_hp=6,
+        ),
     )
-
     game_map.entities.append(player)
 
     for room in rooms[1:]:
@@ -42,7 +44,10 @@ def main() -> None:
         enemy = Entity(
             x=enemy_x, y=enemy_y,
             char="r", color=(200, 80, 80), name="Rat", blocks_movement=True,
-            fighter=Fighter(max_hp=6, power=2, defense=0),
+            fighter=Fighter(
+                stats=Stats(strength=6, dexterity=8, intelligence=4, vitality=6, wisdom=4, luck=8),
+                base_power=2, base_defense=0, base_max_hp=0,
+            ),
         )
         game_map.entities.append(enemy)
 

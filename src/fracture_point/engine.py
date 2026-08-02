@@ -82,7 +82,8 @@ class Engine:
         return False
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
-        damage = max(0, attacker.fighter.power - defender.fighter.defense)
+        raw_damage = max(0, attacker.fighter.power - defender.fighter.defense)
+        damage = round(raw_damage * (1 - defender.fighter.damage_reduction))
 
         if damage > 0:
             self.log.add(f"{attacker.name} hits {defender.name} for {damage}.")
@@ -137,7 +138,7 @@ class Engine:
         for x in range(gm.width):
             for y in range(gm.height):
                 if not gm.explored[x, y]:
-                    color = (20, 10, 20)
+                    color = (50, 10, 40)
                     base_char = "|"
                 else:
                     base_char = "." if gm.tiles[x, y] else "#"
