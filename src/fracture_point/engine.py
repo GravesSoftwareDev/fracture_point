@@ -7,24 +7,9 @@ from fracture_point.entity import Entity
 from fracture_point.game_map import GameMap
 from fracture_point.message_log import MessageLog
 from fracture_point.turn_queue import TurnQueue
-
-MOVE_KEYS = {
-    tcod.event.KeySym.UP: (0, -1),
-    tcod.event.KeySym.DOWN: (0, 1),
-    tcod.event.KeySym.LEFT: (-1, 0),
-    tcod.event.KeySym.RIGHT: (1, 0),
-    tcod.event.KeySym.W: (0, -1),
-    tcod.event.KeySym.S: (0, 1),
-    tcod.event.KeySym.A: (-1, 0),
-    tcod.event.KeySym.D: (1, 0),
-}
-
-# Number-row keys used to pick an inventory item by index (1 -> index 0, etc).
-NUMBER_KEYS = {
-    tcod.event.KeySym.N1: 0, tcod.event.KeySym.N2: 1, tcod.event.KeySym.N3: 2,
-    tcod.event.KeySym.N4: 3, tcod.event.KeySym.N5: 4, tcod.event.KeySym.N6: 5,
-    tcod.event.KeySym.N7: 6, tcod.event.KeySym.N8: 7, tcod.event.KeySym.N9: 8,
-}
+from fracture_point.states.state_manager import StateManager
+from fracture_point.states.playing import PlayingState
+from fracture_point.states.inventory import InventoryState
 
 FOV_RADIUS = 8
 
@@ -34,7 +19,6 @@ class Engine:
         self.game_map = game_map
         self.player = player
         self.log = MessageLog()
-        self.game_state = "playing"  # "playing" | "inventory"
 
         self.sidebar_width = sidebar_width
         self.border_x = self.game_map.width
@@ -43,6 +27,15 @@ class Engine:
         self.turn_queue = TurnQueue()
         for entity in self.game_map.entities:
             self.turn_queue.schedule(entity, 0)
+
+        # Register every known state and enter "playing" as the root
+        # of the graph. Future states (Hub, Crafting, etc.) get
+        # registered here too, with their links declared on the state
+        # classes themselves.
+        self.states = StateManager()
+        self.states.register(PlayingState(self))
+        self.states.register(InventoryState(self))
+        self.states.start("playing")
 
         self.update_fov()
 
@@ -62,69 +55,34 @@ class Engine:
                 continue
 
             if entity is self.player:
-                self.render(console)
-                context.present(console)
-                cost = self.await_player_action()
+                cost = self.await_player_turn(console, context)
             else:
                 cost = self.take_enemy_action(entity)
 
             self.turn_queue.schedule(entity, time + cost)
 
-    def await_player_action(self) -> int:
+    def await_player_turn(self, console: tcod.console.Console, context: tcod.context.Context) -> int:
         """
-        Block until the player's turn actually ends, then return its
-        tick cost.
-
-        Some inputs are "free" and loop back around without ending the
-        turn: opening/closing the inventory, unequipping (per the GDD,
-        removing gear costs nothing), and invalid moves. Equipping and
-        picking up items DO cost a turn, same as moving or attacking.
+        Renders, waits for one event, and hands it to whichever state
+        is on top of the stack. Loops until an event actually ends the
+        player's turn (a real game action). Re-rendering every pass
+        means switching states (opening the inventory, closing it,
+        etc.) shows up immediately - this replaces the old
+        render-only-before-your-turn behavior.
         """
         while True:
-            self.render_current_console_if_needed()  # see note below
+            self.render(console)
+            context.present(console)
 
             for event in tcod.event.wait():
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
 
-                if not isinstance(event, tcod.event.KeyDown):
-                    continue
+                cost = self.states.current.handle_event(event)
+                if cost is not None:
+                    return cost
 
-                if event.sym == tcod.event.KeySym.ESCAPE:
-                    if self.game_state == "inventory":
-                        self.game_state = "playing"
-                        continue
-                    raise SystemExit()
-
-                if self.game_state == "inventory":
-                    self.handle_inventory_key(event.sym)
-                    continue
-
-                # game_state == "playing" from here down.
-                if event.sym == tcod.event.KeySym.I:
-                    self.game_state = "inventory"
-                    continue
-
-                if event.sym == tcod.event.KeySym.G:
-                    if self.try_pickup():
-                        return self.player.fighter.action_cost
-                    continue
-
-                if event.sym == tcod.event.KeySym.U:
-                    self.unequip_slot("weapon")
-                    continue
-
-                if event.sym in MOVE_KEYS:
-                    dx, dy = MOVE_KEYS[event.sym]
-                    took_turn = self.player_action(dx, dy)
-                    if took_turn:
-                        self.update_fov()
-                        return self.player.fighter.action_cost
-
-    def render_current_console_if_needed(self) -> None:
-        """No-op placeholder - see the note below the code block for why
-        this exists and what to do about it."""
-        pass
+                break  # re-render before waiting on the next event
 
     def try_pickup(self) -> bool:
         target = self.game_map.get_item_at(self.player.x, self.player.y)
@@ -141,18 +99,6 @@ class Engine:
         self.game_map.entities.remove(target)
         return True
 
-    def handle_inventory_key(self, sym) -> None:
-        if sym not in NUMBER_KEYS:
-            return
-
-        index = NUMBER_KEYS[sym]
-        if index >= len(self.player.inventory.items):
-            return
-
-        item = self.player.inventory.items[index]
-        self.equip_item(item)
-        self.game_state = "playing"
-
     def equip_item(self, item) -> None:
         candidate_slots = self.player.equipment.empty_slots_for(item)
 
@@ -160,10 +106,9 @@ class Engine:
             self.log.add(f"No open slot for {item.name}.")
             return
 
-        # Multiple valid empty slots (e.g. both ring slots open, or a
-        # rare dual-eligible item): just take the first for now. A
-        # proper "choose which slot" prompt is a follow-up UI step -
-        # flagging this rather than silently deciding it's fine forever.
+        # Multiple valid empty slots (both rings open, or a rare
+        # dual-eligible item): just take the first for now. A proper
+        # "choose which slot" prompt is a follow-up UI step.
         slot_id = candidate_slots[0]
 
         previous = self.player.equipment.equip(item, slot_id)
@@ -187,6 +132,7 @@ class Engine:
             return
 
         self.log.add(f"You unequip {previous.name} ({slot_id}).")
+
     def player_action(self, dx: int, dy: int) -> bool:
         dest_x, dest_y = self.player.x + dx, self.player.y + dy
 
@@ -244,12 +190,7 @@ class Engine:
 
     def render(self, console: tcod.console.Console) -> None:
         console.clear()
-        self.render_map(console)
-        self.render_border(console)
-        if self.game_state == "inventory":
-            self.render_inventory(console)
-        else:
-            self.render_sidebar(console)
+        self.states.current.render(console)
 
     def render_map(self, console: tcod.console.Console) -> None:
         gm = self.game_map
@@ -291,8 +232,10 @@ class Engine:
             console.print(x=x, y=y, text=hp_text, fg=(255, 255, 255))
         y += 1
 
-        weapon_name = self.player.equipment.equipped["weapon"].name if self.player.equipment.equipped["weapon"] else "(none)"
+        weapon = self.player.equipment.equipped["weapon"]
+        weapon_name = weapon.name if weapon else "(none)"
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
+        y += 1
 
         console.print(x=x, y=y, text="[i]nventory  [g]et  [u]nequip", fg=(120, 120, 120))
         y += 2
