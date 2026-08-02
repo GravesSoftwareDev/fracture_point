@@ -10,6 +10,7 @@ from fracture_point.inventory import Inventory
 from fracture_point.item import Item
 from fracture_point.stats import Stats
 from fracture_point.engine import Engine
+from fracture_point.hub import run_hub_screen
 from fracture_point import save_data
 
 ASSETS_DIR = Path("assets")
@@ -26,9 +27,10 @@ TILE_WIDTH = 10
 TILE_HEIGHT = 18
 
 
-def main() -> None:
-    tileset = tcod.tileset.load_truetype_font(str(FONT_PATH), TILE_WIDTH, TILE_HEIGHT)
-
+def build_run() -> Engine:
+    """Generates a fresh dungeon and player (restoring any saved gear),
+    and returns a ready-to-run Engine. Called once per descent from
+    the Hub - previously this was just inline in main()."""
     game_map, rooms = generate_dungeon(
         MAP_WIDTH, MAP_HEIGHT, max_rooms=18, room_min_size=6, room_max_size=10
     )
@@ -41,10 +43,6 @@ def main() -> None:
     player_equipment = Equipment(fighter=player_fighter)
     player_inventory = Inventory(capacity=10)
 
-    # Restore gear that survived a previous escape, if any. Uses
-    # Equipment.equip() directly (bypassing empty_slots_for's "which
-    # slot should this go in" logic) since we already know the exact
-    # slot_id each item was saved under.
     saved_equipped, saved_inventory_items = save_data.load_gear()
     for slot_id, item in saved_equipped.items():
         player_equipment.equip(item, slot_id)
@@ -97,7 +95,11 @@ def main() -> None:
             )
             game_map.entities.append(ring)
 
-    engine = Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
+    return Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
+
+
+def main() -> None:
+    tileset = tcod.tileset.load_truetype_font(str(FONT_PATH), TILE_WIDTH, TILE_HEIGHT)
 
     with tcod.context.new(
         columns=SCREEN_WIDTH,
@@ -107,7 +109,17 @@ def main() -> None:
         vsync=True,
     ) as context:
         console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT, order="F")
-        engine.run(console, context)
+
+        # The window/context/console are created once and persist for
+        # the whole session. The Hub and each dungeon run just take
+        # turns rendering into the same console.
+        while True:
+            action = run_hub_screen(console, context)
+            if action == "quit":
+                break
+
+            engine = build_run()
+            engine.run(console, context)
 
 
 if __name__ == "__main__":

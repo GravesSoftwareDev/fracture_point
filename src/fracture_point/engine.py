@@ -80,9 +80,9 @@ class Engine:
 
     def show_run_end_screen(self, console: tcod.console.Console, context: tcod.context.Context) -> None:
         """
-        Displays the terminal run_end state and waits for any key to
-        quit. This is intentionally simple - once a Hub state exists,
-        this is where we'd transition there instead of exiting.
+        Displays the terminal run_end state and waits for any key.
+        Returns control to the caller (main.py's hub/run loop) instead
+        of quitting - reaching the Hub is now a real destination.
         """
         while True:
             self.render(console)
@@ -92,7 +92,7 @@ class Engine:
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
                 if isinstance(event, tcod.event.KeyDown):
-                    raise SystemExit()
+                    return
 
     def end_run(self, outcome: str) -> None:
         """Called once, exactly when a run stops (death or reaching the
@@ -360,11 +360,12 @@ class Engine:
         y += 2
 
         if self.run_outcome == "escaped":
+            
             console.print(x=x, y=y, text="Your gear is safe.", fg=(150, 220, 150))
+            
         else:
             console.print(x=x, y=y, text="Your gear is lost.", fg=(220, 120, 120))
         y += 2
 
-        console.print(x=x, y=y, text="Press any key to quit.", fg=(120, 120, 120))
+        console.print(x=x, y=y, text="Press any key to return to the Hub.", fg=(120, 120, 120))
         y += 1
-        console.print(x=x, y=y, text="(No hub to return to yet!)", fg=(90, 90, 90))
