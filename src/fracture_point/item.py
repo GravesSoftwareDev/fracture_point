@@ -38,3 +38,13 @@ class Item:
                 return gem
 
         return None
+
+    def empty_socket_index(self) -> int | None:
+        """
+        Index of the first empty socket, or None if the item has no empty
+        sockets.
+        """
+        for i, gem in enumerate(self.sockets):
+            if gem is None:
+                return i
+        return None

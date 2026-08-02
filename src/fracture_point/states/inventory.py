@@ -20,7 +20,7 @@ class InventoryState(GameState):
     """
 
     name = "inventory"
-    linked_states = frozenset({"playing"})
+    linked_states = frozenset({"playing", "socketing"})
 
     def handle_event(self, event: tcod.event.Event) -> int | None:
         if not isinstance(event, tcod.event.KeyDown):
@@ -32,6 +32,10 @@ class InventoryState(GameState):
             engine.states.pop()
             return None
 
+        if event.sym == tcod.event.KeySym.S:
+            engine.states.push("socketing")
+            return None
+        
         if event.sym in NUMBER_KEYS:
             index = NUMBER_KEYS[event.sym]
             if index < len(engine.player.inventory.items):

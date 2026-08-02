@@ -4,6 +4,7 @@ from fracture_point.equipment import Equipment
 from fracture_point.fighter import Fighter
 from fracture_point.inventory import Inventory
 from fracture_point.item import Item
+from fracture_point.gem import Gem
 
 
 class Entity:
@@ -23,6 +24,7 @@ class Entity:
         equipment: Equipment | None = None,
         perception_radius: int = 6,
         gold_value: int | None = None,
+        gem: Gem | None = None,
     ):
         self.x = x
         self.y = y
@@ -36,6 +38,7 @@ class Entity:
         self.equipment = equipment
         self.perception_radius = perception_radius
         self.gold_value = gold_value
+        self.gem = gem
 
     def move(self, dx: int, dy: int) -> None:
         self.x += dx

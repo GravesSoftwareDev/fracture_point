@@ -13,6 +13,7 @@ from fracture_point.states.state_manager import StateManager
 from fracture_point.states.playing import PlayingState
 from fracture_point.states.inventory import InventoryState
 from fracture_point.states.run_end import RunEndState
+from fracture_point.states.socketing import SocketingState
 
 FOV_RADIUS = 8
 
@@ -35,6 +36,7 @@ class Engine:
         self.states.register(PlayingState(self))
         self.states.register(InventoryState(self))
         self.states.register(RunEndState(self))
+        self.states.register(SocketingState(self))
         self.states.start("playing")
 
         # Meta-progression: load whatever currency persisted from
@@ -107,7 +109,11 @@ class Engine:
         save_data.save_currency(self.final_currency)
 
         if outcome == "escaped":
-            save_data.save_gear(self.player.equipment.equipped, self.player.inventory.items)
+            save_data.save_gear(
+                self.player.equipment.equipped,
+                self.player.inventory.items,
+                self.player.inventory.gems,
+            )
         elif outcome == "died":
             save_data.clear_gear()
 
@@ -129,6 +135,16 @@ class Engine:
                 break
 
     def try_pickup(self) -> bool:
+        gem_target = self.game_map.get_gem_at(self.player.x, self.player.y)
+        if gem_target is not None:
+            if self.player.inventory.gems_full:
+                self.log.add("No room to carry another crystal.")
+                return False
+            self.player.inventory.add_gem(gem_target.gem)
+            self.log.add(f"You pick up {gem_target.gem.name}.")
+            self.game_map.entities.remove(gem_target)
+            return True
+
         target = self.game_map.get_item_at(self.player.x, self.player.y)
         if target is None:
             self.log.add("There's nothing here to pick up.")
@@ -172,6 +188,20 @@ class Engine:
             return
 
         self.log.add(f"You unequip {previous.name} ({slot_id}).")
+
+    def socket_gem(self, gem, item) -> None:
+        """
+        Places gem into item's first empty socket. Free action - no turn cost for now. May be moved to the hub only?
+        """
+
+        index = item.empty_socket_index()
+        if index is None:
+            self.log.add(f"{item.name} has no open socket.")
+            return
+
+        item.sockets[index] = gem
+        self.player.inventory.remove_gem(gem)
+        self.log.add(f"You socket {gem.name} into {item.name}.") 
 
     def player_action(self, dx: int, dy: int) -> bool:
         dest_x, dest_y = self.player.x + dx, self.player.y + dy
@@ -433,7 +463,37 @@ class Engine:
 
         y += 1
         console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
+        y += 1
+        console.print(x=x, y=y, text="[s] socket a crystal", fg=(120, 120, 120))
 
+    def render_socketing(self, console: tcod.console.Console, step: str, socketable_items: list) -> None:
+        title = "Socket: Choose Item" if step == "choose_item" else "Socket: Choose Gem"
+        console.draw_frame(
+            x=0,y=0, width=console.width, height=console.height, title = title, fg=(180,180,180), bg=(0,0,0),
+        )
+
+        x, y= 2, 2
+
+        if step == "choose_item":
+            if not socketable_items:
+                console.print(x=x, y=y, text="(nothing has an open socket)", fg=(150,150,150))
+            else:
+                for i, item in enumerate(socketable_items):
+                    line = f"{i + 1}. {item.name}"
+                    console.print(x=x, y=y, text=line, fg=item.color)
+                    y+=1
+        else:
+            gems = self.player.inventory.gems
+            if not gems:
+                console.print(x=x, y=y, text="(no crystals carried)", fg=(150,150,150))
+            else:
+                for i, gem in enumerate(gems):
+                    line = f"{i + 1}. {gem.name} ({gem.current_charge})/({gem.max_charge})"
+                    console.print(x=x,y=y, text=line, fg=gem.color)
+                    y+=1
+        y+=1
+        console.print(x=x, y=y, text="[esc] back", fg=(120,120,120))
+    
     def render_run_end(self, console: tcod.console.Console) -> None:
         title = "You Escaped" if self.run_outcome == "escaped" else "You Died"
         console.draw_frame(

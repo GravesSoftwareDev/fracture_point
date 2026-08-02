@@ -45,11 +45,13 @@ def build_run() -> Engine:
     player_equipment = Equipment(fighter=player_fighter)
     player_inventory = Inventory(capacity=10)
 
-    saved_equipped, saved_inventory_items = save_data.load_gear()
+    saved_equipped, saved_inventory_items, saved_gems = save_data.load_gear()
     for slot_id, item in saved_equipped.items():
         player_equipment.equip(item, slot_id)
     for item in saved_inventory_items:
         player_inventory.add(item)
+    for gem in saved_gems:
+        player_inventory.add_gem(gem)
 
     player = Entity(
         x=player_x, y=player_y,
@@ -98,20 +100,28 @@ def build_run() -> Engine:
             game_map.entities.append(ring)
 
             wand_x, wand_y = room.x1 + 4, room.y1 + 2
-            spark_crystal = Gem(
-                name="Spark Crystal", char="*", color=(120, 200, 220),
-                max_charge=10, charge_per_turn=1, cast_cost=3,
-            )
             wand = Entity(
                 x=wand_x, y=wand_y,
                 char="/", color=(120, 200, 220), name="Apprentice Wand",
                 item=Item(
                     name="Apprentice Wand", char="/", color=(120, 200, 220),
                     slot_types=["wand"], magic_power_bonus=3,
-                    gem_slots=1, sockets=[spark_crystal],
+                    gem_slots=1, sockets=[]
                 ),
             )
             game_map.entities.append(wand)
+
+            ember_crystal = Gem(
+                name="Ember Crystal", char="*", color=(220, 120, 60),
+                max_charge=8, charge_per_turn=1, cast_cost=4,
+            )
+            ember_x, ember_y = room.x1 + 5, room.y1 + 2
+            ember_entity = Entity(
+                x=ember_x, y=ember_y,
+                char="*", color=(220, 120, 60), name="Ember Crystal",
+                gem=ember_crystal,
+            )
+            game_map.entities.append(ember_entity)
 
     return Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
 

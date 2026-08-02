@@ -10,7 +10,7 @@ SAVE_PATH = Path("saves") / "save.json"
 
 DEFAULT_SAVE = {
     "currency": 0,
-    "gear": {"equipped": {}, "inventory": []},
+    "gear": {"equipped": {}, "inventory": [], "loose_gems": []},
 }
 
 
@@ -96,28 +96,30 @@ def save_currency(amount: int) -> None:
     _write(data)
 
 
-def save_gear(equipped: dict[str, Item | None], inventory_items: list[Item]) -> None:
+def save_gear(equipped: dict[str, Item | None], inventory_items: list[Item], inventory_gems: list[Gem]) -> None:
     data = load_save()
     data["gear"] = {
         "equipped": {
             slot_id: _item_to_dict(item) for slot_id, item in equipped.items() if item is not None
         },
         "inventory": [_item_to_dict(item) for item in inventory_items],
+        "loose_gems": [_gem_to_dict(gem) for gem in inventory_gems],
     }
     _write(data)
 
 
 def clear_gear() -> None:
     data = load_save()
-    data["gear"] = {"equipped": {}, "inventory": []}
+    data["gear"] = {"equipped": {}, "inventory": [], "loose_gems": []}
     _write(data)
 
 
-def load_gear() -> tuple[dict[str, Item], list[Item]]:
+def load_gear() -> tuple[dict[str, Item], list[Item], list[Gem]]:
     data = load_save()
     equipped = {
         slot_id: _item_from_dict(item_data)
         for slot_id, item_data in data["gear"]["equipped"].items()
     }
     inventory_items = [_item_from_dict(item_data) for item_data in data["gear"]["inventory"]]
-    return equipped, inventory_items
+    loose_gems = [_gem_from_dict(g) for g in data["gear"].get("loose_gems", [])]
+    return equipped, inventory_items, loose_gems
