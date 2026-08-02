@@ -27,6 +27,7 @@ class Entity:
         gold_value: int | None = None,
         gem: Gem | None = None,
         consumable: Consumable | None = None,
+        is_corpse: bool = False,
     ):
         self.x = x
         self.y = y
@@ -42,6 +43,10 @@ class Entity:
         self.gold_value = gold_value
         self.gem = gem
         self.consumable = consumable
+        # Explicit flag rather than inferring "this is a corpse" from
+        # char == '%' or fighter being None (which items/gold/gems also
+        # satisfy) - set True in Engine.die(), used for render priority.
+        self.is_corpse = is_corpse
 
     def move(self, dx: int, dy: int) -> None:
         self.x += dx

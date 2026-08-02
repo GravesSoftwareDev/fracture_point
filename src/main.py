@@ -5,15 +5,13 @@ import tcod
 from fracture_point.dungeon_generator import generate_dungeon
 from fracture_point.entity import Entity
 from fracture_point.equipment import Equipment
-from fracture_point.gem import Gem
 from fracture_point.fighter import Fighter
 from fracture_point.inventory import Inventory
-from fracture_point.item import Item
 from fracture_point.stats import Stats
 from fracture_point.engine import Engine
 from fracture_point.hub import run_hub_screen
+from fracture_point.loot_table import pick_loot
 from fracture_point import save_data
-from fracture_point.consumable import Consumable
 
 ASSETS_DIR = Path("assets")
 FONT_PATH = ASSETS_DIR / "IBM_Plex_Mono" / "IBMPlexMono-Bold.ttf"
@@ -25,14 +23,35 @@ PANEL_WIDTH = 32
 SCREEN_WIDTH = MAP_WIDTH + PANEL_WIDTH
 SCREEN_HEIGHT = MAP_HEIGHT
 
-TILE_WIDTH = 14
-TILE_HEIGHT = 24
+TILE_WIDTH = 10
+TILE_HEIGHT = 18
+
+# Chance that any given non-starting room gets ONE random loot spawn,
+# on top of its guaranteed enemy + gold. Which item you get is decided
+# by loot_table.json's per-entry weights, not this constant - this only
+# controls whether a room gets a loot roll AT ALL.
+LOOT_CHANCE = 0.6
+
+
+def pick_free_tile(room, taken_positions: set[tuple[int, int]]) -> tuple[int, int]:
+    """
+    Picks a random tile within a room's interior, avoiding any already-
+    occupied positions (so loot doesn't spawn stacked on the enemy or
+    gold pile in that room). Falls back to the room's center if it
+    can't find a free spot after a few tries.
+    """
+    for _ in range(10):
+        x = random.randint(room.x1 + 1, room.x2 - 1)
+        y = random.randint(room.y1 + 1, room.y2 - 1)
+        if (x, y) not in taken_positions:
+            return x, y
+    return room.center
 
 
 def build_run() -> Engine:
     """Generates a fresh dungeon and player (restoring any saved gear),
     and returns a ready-to-run Engine. Called once per descent from
-    the Hub - previously this was just inline in main()."""
+    the Hub."""
     game_map, rooms = generate_dungeon(
         MAP_WIDTH, MAP_HEIGHT, max_rooms=18, room_min_size=6, room_max_size=10
     )
@@ -63,11 +82,14 @@ def build_run() -> Engine:
     )
     game_map.entities.append(player)
 
-    for i, room in enumerate(rooms[1:], start=1):
+    for room in rooms[1:]:
+        taken_positions: set[tuple[int, int]] = set()
+
         enemy_x, enemy_y = room.center
+        taken_positions.add((enemy_x, enemy_y))
         enemy = Entity(
             x=enemy_x, y=enemy_y,
-            char="r", color=(200, 80, 80), name="Rat", blocks_movement=True,
+            char="r", color=(160, 160, 160), name="Rat", blocks_movement=True,
             fighter=Fighter(
                 stats=Stats(strength=6, dexterity=16, intelligence=4, vitality=6, wisdom=4, luck=8),
                 base_power=2, base_defense=0, base_max_hp=0,
@@ -75,7 +97,8 @@ def build_run() -> Engine:
         )
         game_map.entities.append(enemy)
 
-        gold_x, gold_y = room.x1 + 1, room.y1 + 1
+        gold_x, gold_y = pick_free_tile(room, taken_positions)
+        taken_positions.add((gold_x, gold_y))
         gold_pile = Entity(
             x=gold_x, y=gold_y,
             char="$", color=(230, 200, 80), name="Gold",
@@ -83,66 +106,9 @@ def build_run() -> Engine:
         )
         game_map.entities.append(gold_pile)
 
-        if i % 2 == 0:
-            item_x, item_y = room.x1 + 2, room.y1 + 2
-            dagger = Entity(
-                x=item_x, y=item_y,
-                char="/", color=(200, 200, 100), name="Dagger",
-                item=Item(name="Dagger", char="/", color=(200, 200, 100), slot_types=["weapon"], power_bonus=2),
-            )
-            game_map.entities.append(dagger)
-
-            ring_x, ring_y = room.x1 + 3, room.y1 + 2
-            ring = Entity(
-                x=ring_x, y=ring_y,
-                char="=", color=(220, 180, 60), name="Ring of Fortitude",
-                item=Item(name="Ring of Fortitude", char="=", color=(220, 180, 60), slot_types=["ring"], defense_bonus=1),
-            )
-            game_map.entities.append(ring)
-
-            wand_x, wand_y = room.x1 + 4, room.y1 + 2
-            wand = Entity(
-                x=wand_x, y=wand_y,
-                char="/", color=(120, 200, 220), name="Apprentice Wand",
-                item=Item(
-                    name="Apprentice Wand", char="/", color=(120, 200, 220),
-                    slot_types=["wand"], magic_power_bonus=3,
-                    gem_slots=1, sockets=[]
-                ),
-            )
-            game_map.entities.append(wand)
-
-            ember_crystal = Gem(
-                name="Ember Crystal", char="*", color=(220, 120, 60),
-                max_charge=8, charge_per_turn=1, cast_cost=4,
-            )
-            ember_x, ember_y = room.x1 + 5, room.y1 + 2
-            ember_entity = Entity(
-                x=ember_x, y=ember_y,
-                char="*", color=(220, 120, 60), name="Ember Crystal",
-                gem=ember_crystal,
-            )
-            game_map.entities.append(ember_entity)
-
-            flame_ring_x, flame_ring_y = room.x1 + 6, room.y1 + 2
-            flame_ring = Entity(
-                x=flame_ring_x, y=flame_ring_y,
-                char="=", color=(220, 100, 60), name="Ring of Flame",
-                item=Item(
-                    name="Ring of Flame", char="=", color=(220, 100, 60),
-                    slot_types=["ring"], defense_bonus=2,
-                    base_name="Ring", identify_property="flame",
-                ),
-            )
-            game_map.entities.append(flame_ring)
-
-            scroll_x, scroll_y = room.x1 + 1, room.y1 + 3
-            scroll_entity = Entity(
-                x=scroll_x, y=scroll_y,
-                char="?", color=(230, 230, 180), name="Identify Scroll",
-                consumable=Consumable(name="Identify Scroll", char="?", color=(230, 230, 180), kind="identify"),
-            )
-            game_map.entities.append(scroll_entity)
+        if random.random() < LOOT_CHANCE:
+            loot_x, loot_y = pick_free_tile(room, taken_positions)
+            game_map.entities.append(pick_loot(loot_x, loot_y))
 
     return Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
 
@@ -160,9 +126,6 @@ def main() -> None:
     ) as context:
         console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT, order="F")
 
-        # The window/context/console are created once and persist for
-        # the whole session. The Hub and each dungeon run just take
-        # turns rendering into the same console.
         while True:
             action = run_hub_screen(console, context)
             if action == "quit":

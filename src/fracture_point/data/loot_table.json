@@ -1,0 +1,80 @@
+{
+  "items": {
+
+    "weapons": [
+      {
+        "name": "Dagger",
+        "char": "/",
+        "color": [200, 200, 100],
+        "slot_types": ["weapon"],
+        "power_bonus": 2,
+        "weight": 20
+      }
+    ],
+
+    "rings": [
+      {
+        "name": "Ring of Fortitude",
+        "char": "=",
+        "color": [220, 180, 60],
+        "slot_types": ["ring"],
+        "defense_bonus": 1,
+        "weight": 15
+      },
+      {
+        "name": "Ring of Flame",
+        "char": "=",
+        "color": [220, 100, 60],
+        "slot_types": ["ring"],
+        "defense_bonus": 2,
+        "base_name": "Ring",
+        "identify_property": "flame",
+        "weight": 10
+      }
+    ],
+
+    "wands": [
+      {
+        "name": "Apprentice Wand",
+        "char": "/",
+        "color": [120, 200, 220],
+        "slot_types": ["wand"],
+        "magic_power_bonus": 3,
+        "gem_slots": 1,
+        "socketed_gem": {
+          "name": "Spark Crystal",
+          "char": "*",
+          "color": [120, 200, 220],
+          "max_charge": 10,
+          "charge_per_turn": 1,
+          "cast_cost": 3
+        },
+        "weight": 12
+      }
+    ]
+
+  },
+
+  "gems": [
+    {
+      "name": "Ember Crystal",
+      "char": "*",
+      "color": [220, 120, 60],
+      "max_charge": 8,
+      "charge_per_turn": 1,
+      "cast_cost": 4,
+      "weight": 15
+    }
+  ],
+
+  "consumables": [
+    {
+      "name": "Identify Scroll",
+      "char": "?",
+      "color": [230, 230, 180],
+      "kind": "identify",
+      "weight": 20
+    }
+  ]
+
+}

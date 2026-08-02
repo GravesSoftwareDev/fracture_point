@@ -12,11 +12,21 @@ from fracture_point.pathfinding import compute_path
 from fracture_point.states.state_manager import StateManager
 from fracture_point.states.playing import PlayingState
 from fracture_point.states.inventory import InventoryState
-from fracture_point.states.run_end import RunEndState
 from fracture_point.states.socketing import SocketingState
 from fracture_point.states.identify import IdentifyState
+from fracture_point.states.unequip import UnequipState
+from fracture_point.states.run_end import RunEndState
 
 FOV_RADIUS = 8
+
+# Render priority for entities sharing a tile - HIGHER draws on top.
+# Sorted ascending and drawn in that order, so the highest-priority
+# thing present is always what's visible last (on top) if several
+# entities land on the same tile.
+PRIORITY_CORPSE = 0
+PRIORITY_GROUND_ITEM = 50   # items, gold, gems, consumables
+PRIORITY_LIVING = 80
+PRIORITY_PLAYER = 100
 
 
 class Engine:
@@ -36,19 +46,16 @@ class Engine:
         self.states = StateManager()
         self.states.register(PlayingState(self))
         self.states.register(InventoryState(self))
-        self.states.register(RunEndState(self))
         self.states.register(SocketingState(self))
         self.states.register(IdentifyState(self))
+        self.states.register(UnequipState(self))
+        self.states.register(RunEndState(self))
         self.states.start("playing")
 
-        # Meta-progression: load whatever currency persisted from
-        # previous runs. gold_collected tracks only THIS run's take,
-        # so the run-end screen can show both "earned this run" and
-        # "total banked" separately.
         save = save_data.load_save()
-        self.known_properties: set[str] = set(save.get("known_properties", []))
         self.currency_at_start = save["currency"]
         self.gold_collected = 0
+        self.known_properties: set[str] = set(save.get("known_properties", []))
 
         self.run_active = True
         self.run_outcome: str | None = None  # "died" | "escaped"
@@ -74,12 +81,12 @@ class Engine:
             if entity is self.player:
                 cost = self.await_player_turn(console, context)
                 if self.run_active:
-                    self.regen_gear_charge()
+                    self.regen_player_gear_charge()
             else:
                 cost = self.take_enemy_action(entity)
 
             if not self.run_active:
-                break  # Death/extraction happened mid-turn - don't reschedule.
+                break
 
             self.turn_queue.schedule(entity, time + cost)
 
@@ -88,8 +95,8 @@ class Engine:
     def show_run_end_screen(self, console: tcod.console.Console, context: tcod.context.Context) -> None:
         """
         Displays the terminal run_end state and waits for any key.
-        Returns control to the caller (main.py's hub/run loop) instead
-        of quitting - reaching the Hub is now a real destination.
+        Returns control to the caller (main.py's hub/run loop) - reaching
+        the Hub is a real transition, not a dead end.
         """
         while True:
             self.render(console)
@@ -168,27 +175,9 @@ class Engine:
             return False
 
         self.player.inventory.add(target.item)
-        self.log.add(f"You pick up {target.item.name}.")
+        self.log.add(f"You pick up {target.item.display_name(self.known_properties)}.")
         self.game_map.entities.remove(target)
         return True
-
-    def attempt_identify(self, item) -> None:
-        """
-        Consumes one Identify Scroll (if the player has one) to
-        reveal item's property. Preperty identification is permanent
-        and global. Since it's knowledge, it isn't lost at the end of a run like gear.
-        """
-        scroll = next((c for c in self.player.inventory.consumables if c.kind == "identify"), None)
-
-        if scroll is None:
-            self.log.add("You have no identify scroll.")
-            return
-
-        self.player.inventory.remove_consumable(scroll)
-        self.known_properties.add(item.identify_property)
-        save_data.save_known_properties(self.known_properties)
-
-        self.log.add(f"It's {item.name}!")
 
     def equip_item(self, item) -> None:
         candidate_slots = self.player.equipment.empty_slots_for(item)
@@ -222,18 +211,27 @@ class Engine:
         self.log.add(f"You unequip {previous.display_name(self.known_properties)} ({slot_id}).")
 
     def socket_gem(self, gem, item) -> None:
-        """
-        Places gem into item's first empty socket. Free action - no turn cost for now. May be moved to the hub only?
-        """
-
         index = item.empty_socket_index()
         if index is None:
-            self.log.add(f"{item.name} has no open socket.")
+            self.log.add(f"{item.display_name(self.known_properties)} has no open socket.")
             return
 
         item.sockets[index] = gem
         self.player.inventory.remove_gem(gem)
-        self.log.add(f"You socket {gem.name} into {item.name}.") 
+        self.log.add(f"You socket {gem.name} into {item.display_name(self.known_properties)}.")
+
+    def attempt_identify(self, item) -> None:
+        scroll = next((c for c in self.player.inventory.consumables if c.kind == "identify"), None)
+
+        if scroll is None:
+            self.log.add("You have no identify scroll.")
+            return
+
+        self.player.inventory.remove_consumable(scroll)
+        self.known_properties.add(item.identify_property)
+        save_data.save_known_properties(self.known_properties)
+
+        self.log.add(f"It's {item.name}!")
 
     def player_action(self, dx: int, dy: int) -> bool:
         dest_x, dest_y = self.player.x + dx, self.player.y + dy
@@ -248,20 +246,78 @@ class Engine:
 
         self.player.move(dx, dy)
 
-        # Auto-pickup gold - free, no separate 'g' press needed, unlike
-        # gear items. Checked right after a successful move.
         gold_entity = self.game_map.get_gold_at(dest_x, dest_y)
         if gold_entity is not None:
             self.gold_collected += gold_entity.gold_value
             self.log.add(f"You find {gold_entity.gold_value} gold.")
             self.game_map.entities.remove(gold_entity)
 
-        # Reaching the stairs ends the run successfully.
         if self.game_map.stairs == (dest_x, dest_y):
             self.log.add("You found the stairs and escaped with your loot!")
             self.end_run("escaped")
 
         return True
+
+    def find_nearest_visible_enemy(self) -> Entity | None:
+        candidates = [
+            e for e in self.game_map.entities
+            if e is not self.player
+            and e.fighter is not None
+            and e.fighter.is_alive
+            and self.game_map.visible[e.x, e.y]
+        ]
+        if not candidates:
+            return None
+
+        return min(
+            candidates,
+            key=lambda e: max(abs(e.x - self.player.x), abs(e.y - self.player.y)),
+        )
+
+    def cast_bolt(self, caster: Entity, target: Entity) -> None:
+        raw_damage = caster.fighter.magic_power
+        damage = round(raw_damage * (1 - target.fighter.magic_resist))
+
+        if damage > 0:
+            self.log.add(f"{caster.name} casts a bolt at {target.name} for {damage}.")
+            target.fighter.take_damage(damage)
+        else:
+            self.log.add(f"{caster.name}'s bolt fizzles against {target.name}.")
+
+        if not target.fighter.is_alive:
+            self.die(target)
+
+    def attempt_cast(self) -> int | None:
+        wand = self.player.equipment.equipped["wand"]
+        if wand is None:
+            self.log.add("You have no wand equipped.")
+            return None
+
+        gem = wand.socketed_active_gem()
+        if gem is None:
+            self.log.add(f"{wand.display_name(self.known_properties)} has no ability crystal socketed.")
+            return None
+
+        if not gem.can_cast():
+            self.log.add(f"{gem.name} doesn't have enough charge ({gem.current_charge}/{gem.max_charge}).")
+            return None
+
+        target = self.find_nearest_visible_enemy()
+        if target is None:
+            self.log.add("No target in sight.")
+            return None
+
+        gem.consume()
+        self.cast_bolt(self.player, target)
+        return self.player.fighter.action_cost
+
+    def regen_player_gear_charge(self) -> None:
+        for item in self.player.equipment.equipped.values():
+            if item is None:
+                continue
+            for gem in item.sockets:
+                if gem is not None:
+                    gem.regen()
 
     def take_enemy_action(self, entity: Entity) -> int:
         dist_x = abs(entity.x - self.player.x)
@@ -305,91 +361,28 @@ class Engine:
         if not defender.fighter.is_alive:
             self.die(defender)
 
-    def find_nearest_visible_enemy(self) -> Entity | None:
-        """
-        Auto target: nearest living enemy currently in the player's FOV.
-
-        This is currently the only targetting system for now. Manual selection comes later.
-        """
-
-        candidates = [
-            e for e in self.game_map.entities
-            if e is not self.player and e.fighter is not None
-            and e.fighter.is_alive and self.game_map.visible[e.x, e.y]
-        ]
-        if not candidates:
-            return None
-
-        return min(
-            candidates,
-            key=lambda e: max(abs(e.x - self.player.x), abs(e.y - self.player.y)),
-        )
-
-    def cast_bolt(self, caster: Entity, target: Entity) -> None:
-        """
-        A simple ranged magic attack: caster.magic_power vs target.magic_resist
-
-        currently auto targets closest enemy entity
-        """
-
-        raw_damage = caster.fighter.magic_power
-        damage = round(raw_damage*(1-target.fighter.magic_resist))
-
-        if damage > 0:
-            self.log.add(f"{caster.name} casts a bolt at {target.name} for {damage}.")
-            target.fighter.take_damage(damage)
-        else:
-            self.log.add(f"{caster.name}'s bolt fizzles against {target.name}")
-
-        if not target.fighter.is_alive:
-            self.die(target)
-
-    def attempt_cast(self) -> int | None:
-        """Handles the 'C' key: validates a wand is equipped and a
-        target exists, then casts. Returns the tick cost on a successful
-        cast, or None if nothing happened (no turn spent)."""
-        wand = self.player.equipment.equipped["wand"]
-        if wand is None:
-            self.log.add("You have no wand equipped.")
-            return None
-        gem = wand.socketed_active_gem()
-        if gem is None:
-            self.log.add(f"{wand.name} has no ability crystal socketed.")
-            return None
-
-        if not gem.can_cast():
-            self.log.add(f"{gem.name} doesn't ahve enough charge ({gem.current_charge})/({gem.max_charge}).")
-
-        target = self.find_nearest_visible_enemy()
-        if target is None:
-            self.log.add("No target in sight.")
-            return None
-
-        gem.consume()
-        self.cast_bolt(self.player, target)
-        return self.player.fighter.action_cost
-
-    def regen_gear_charge(self) -> None:
-        """
-        Regenerates charge on every socketed gem across all of the player's equipped items, once per player turn.
-        """
-        for item in self.player.equipment.equipped.values():
-            if item is None:
-                continue
-            for gem in item.sockets:
-                if gem is not None:
-                    gem.regen()
-    
     def die(self, entity: Entity) -> None:
         self.log.add(f"{entity.name} dies!")
         entity.blocks_movement = False
         entity.char = "%"
         entity.color = (120, 30, 30)
         entity.fighter = None
+        entity.is_corpse = True
 
         if entity is self.player:
             self.log.add("You have died.")
             self.end_run("died")
+
+    def _render_priority(self, entity: Entity) -> int:
+        """Higher = drawn on top when multiple entities share a tile.
+        See the module-level PRIORITY_* constants."""
+        if entity is self.player:
+            return PRIORITY_PLAYER
+        if entity.is_corpse:
+            return PRIORITY_CORPSE
+        if entity.fighter is not None and entity.fighter.is_alive:
+            return PRIORITY_LIVING
+        return PRIORITY_GROUND_ITEM
 
     def render(self, console: tcod.console.Console) -> None:
         self.map_console.clear()
@@ -421,11 +414,23 @@ class Engine:
 
                 console.print(x=x, y=y, text=base_char, fg=color)
 
-        for entity in gm.entities:
+        # Draw lowest-priority entities first, highest last, so anything
+        # sharing a tile with something more "important" gets covered by
+        # it rather than the reverse. This is what fixes corpses
+        # painting over the player/items - previously entities were
+        # drawn in raw list order, which had no relationship to what
+        # should visually "win" on a shared tile.
+        for entity in sorted(gm.entities, key=self._render_priority):
+            # A corpse should never hide the stairs marker underneath it -
+            # stairs are drawn at the tile level above, not as an entity,
+            # so sorting alone can't protect them the way it protects the
+            # player/items. Skip drawing the corpse there entirely instead.
+            if entity.is_corpse and gm.stairs == (entity.x, entity.y):
+                continue
+
             if gm.visible[entity.x, entity.y]:
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
             elif gm.explored[entity.x, entity.y] and entity.fighter is None:
-
                 dim_color = tuple(c // 2 for c in entity.color)
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=dim_color)
 
@@ -463,7 +468,7 @@ class Engine:
         console.print(x=x, y=y, text=wand_text, fg=(180, 220, 220))
         y += 1
 
-        console.print(x=x, y=y, text="[i]nv  [g]et  [u]nequip", fg=(120, 120, 120))
+        console.print(x=x, y=y, text="[i]nv  [g]et  [c]ast", fg=(120, 120, 120))
         y += 2
 
         console.print(x=x, y=y, text="── Log ──", fg=(120, 120, 120))
@@ -500,36 +505,82 @@ class Engine:
         y += 1
         console.print(x=x, y=y, text="[r] read identify scroll", fg=(120, 120, 120))
         y += 1
+        console.print(x=x, y=y, text="[u] unequip gear", fg=(120, 120, 120))
+        y += 1
         console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
 
     def render_socketing(self, console: tcod.console.Console, step: str, socketable_items: list) -> None:
         title = "Socket: Choose Item" if step == "choose_item" else "Socket: Choose Gem"
         console.draw_frame(
-            x=0,y=0, width=console.width, height=console.height, title = title, fg=(180,180,180), bg=(0,0,0),
+            x=0, y=0, width=console.width, height=console.height,
+            title=title, fg=(180, 180, 180), bg=(0, 0, 0),
         )
 
-        x, y= 2, 2
+        x, y = 2, 2
 
         if step == "choose_item":
             if not socketable_items:
-                console.print(x=x, y=y, text="(nothing has an open socket)", fg=(150,150,150))
+                console.print(x=x, y=y, text="(nothing has an open socket)", fg=(150, 150, 150))
             else:
                 for i, item in enumerate(socketable_items):
                     line = f"{i + 1}. {item.display_name(self.known_properties)}"
                     console.print(x=x, y=y, text=line, fg=item.color)
-                    y+=1
+                    y += 1
         else:
             gems = self.player.inventory.gems
             if not gems:
-                console.print(x=x, y=y, text="(no crystals carried)", fg=(150,150,150))
+                console.print(x=x, y=y, text="(no crystals carried)", fg=(150, 150, 150))
             else:
                 for i, gem in enumerate(gems):
-                    line = f"{i + 1}. {gem.name} ({gem.current_charge})/({gem.max_charge})"
-                    console.print(x=x,y=y, text=line, fg=gem.color)
-                    y+=1
-        y+=1
-        console.print(x=x, y=y, text="[esc] back", fg=(120,120,120))
-    
+                    line = f"{i + 1}. {gem.name} ({gem.current_charge}/{gem.max_charge})"
+                    console.print(x=x, y=y, text=line, fg=gem.color)
+                    y += 1
+
+        y += 1
+        console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
+
+    def render_identify(self, console: tcod.console.Console, unidentified_items: list) -> None:
+        console.draw_frame(
+            x=0, y=0, width=console.width, height=console.height,
+            title="Read Scroll", fg=(180, 180, 180), bg=(0, 0, 0),
+        )
+
+        x, y = 2, 2
+
+        scroll_count = sum(1 for c in self.player.inventory.consumables if c.kind == "identify")
+        console.print(x=x, y=y, text=f"Identify Scrolls: {scroll_count}", fg=(200, 200, 220))
+        y += 2
+
+        if not unidentified_items:
+            console.print(x=x, y=y, text="(nothing unidentified)", fg=(150, 150, 150))
+        else:
+            for i, item in enumerate(unidentified_items):
+                line = f"{i + 1}. {item.display_name(self.known_properties)}"
+                console.print(x=x, y=y, text=line, fg=item.color)
+                y += 1
+
+        y += 1
+        console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
+
+    def render_unequip(self, console: tcod.console.Console, equipped_slots: list) -> None:
+        console.draw_frame(
+            x=0, y=0, width=console.width, height=console.height,
+            title="Unequip", fg=(180, 180, 180), bg=(0, 0, 0),
+        )
+
+        x, y = 2, 2
+
+        if not equipped_slots:
+            console.print(x=x, y=y, text="(nothing equipped)", fg=(150, 150, 150))
+        else:
+            for i, (slot_id, item) in enumerate(equipped_slots):
+                line = f"{i + 1}. [{slot_id}] {item.display_name(self.known_properties)}"
+                console.print(x=x, y=y, text=line, fg=item.color)
+                y += 1
+
+        y += 1
+        console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
+
     def render_run_end(self, console: tcod.console.Console) -> None:
         title = "You Escaped" if self.run_outcome == "escaped" else "You Died"
         console.draw_frame(
@@ -544,35 +595,9 @@ class Engine:
         y += 2
 
         if self.run_outcome == "escaped":
-            
             console.print(x=x, y=y, text="Your gear is safe.", fg=(150, 220, 150))
-            
         else:
             console.print(x=x, y=y, text="Your gear is lost.", fg=(220, 120, 120))
         y += 2
 
         console.print(x=x, y=y, text="Press any key to return to the Hub.", fg=(120, 120, 120))
-        y += 1
-
-    def render_identify(self, console: tcod.console.Console, unidentified_items: list) -> None:
-            console.draw_frame(
-                x=0, y=0, width=console.width, height=console.height,
-                title="Read Scroll", fg=(180, 180, 180), bg=(0, 0, 0),
-            )
-
-            x, y = 2, 2
-
-            scroll_count = sum(1 for c in self.player.inventory.consumables if c.kind == "identify")
-            console.print(x=x, y=y, text=f"Identify Scrolls: {scroll_count}", fg=(200, 200, 220))
-            y += 2
-
-            if not unidentified_items:
-                console.print(x=x, y=y, text="(nothing unidentified)", fg=(150, 150, 150))
-            else:
-                for i, item in enumerate(unidentified_items):
-                    line = f"{i + 1}. {item.display_name(self.known_properties)}"
-                    console.print(x=x, y=y, text=line, fg=item.color)
-                    y += 1
-
-            y += 1
-            console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))     

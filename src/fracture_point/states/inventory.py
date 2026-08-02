@@ -13,14 +13,15 @@ NUMBER_KEYS = {
 
 class InventoryState(GameState):
     """
-    An overlay on top of Playing: browsing and equipping carried items.
+    An overlay on top of Playing: browsing/equipping carried items,
+    and jumping into the Socketing / Identify / Unequip sub-screens.
 
     Equipping costs a turn (per the GDD); opening/closing this screen
     and browsing don't.
     """
 
     name = "inventory"
-    linked_states = frozenset({"playing", "socketing", "identify"})
+    linked_states = frozenset({"playing", "socketing", "identify", "unequip"})
 
     def handle_event(self, event: tcod.event.Event) -> int | None:
         if not isinstance(event, tcod.event.KeyDown):
@@ -39,7 +40,11 @@ class InventoryState(GameState):
         if event.sym == tcod.event.KeySym.R:
             engine.states.push("identify")
             return None
-        
+
+        if event.sym == tcod.event.KeySym.U:
+            engine.states.push("unequip")
+            return None
+
         if event.sym in NUMBER_KEYS:
             index = NUMBER_KEYS[event.sym]
             if index < len(engine.player.inventory.items):
@@ -51,5 +56,6 @@ class InventoryState(GameState):
         return None
 
     def render(self, map_console: tcod.console.Console, panel_console: tcod.console.Console) -> None:
-        self.engine.render_map(map_console)
-        self.engine.render_inventory(panel_console)
+        engine = self.engine
+        engine.render_map(map_console)
+        engine.render_inventory(panel_console)
