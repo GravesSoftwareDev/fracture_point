@@ -19,6 +19,13 @@ MOVE_KEYS = {
     tcod.event.KeySym.D: (1, 0),
 }
 
+# Number-row keys used to pick an inventory item by index (1 -> index 0, etc).
+NUMBER_KEYS = {
+    tcod.event.KeySym.N1: 0, tcod.event.KeySym.N2: 1, tcod.event.KeySym.N3: 2,
+    tcod.event.KeySym.N4: 3, tcod.event.KeySym.N5: 4, tcod.event.KeySym.N6: 5,
+    tcod.event.KeySym.N7: 6, tcod.event.KeySym.N8: 7, tcod.event.KeySym.N9: 8,
+}
+
 FOV_RADIUS = 8
 
 
@@ -27,15 +34,12 @@ class Engine:
         self.game_map = game_map
         self.player = player
         self.log = MessageLog()
+        self.game_state = "playing"  # "playing" | "inventory"
 
         self.sidebar_width = sidebar_width
         self.border_x = self.game_map.width
         self.sidebar_x = self.border_x + 1
 
-        # Every entity starts scheduled at time 0. Order among them at
-        # the same time is just insertion order (see TurnQueue), which
-        # is fine - it only matters who's *fastest going forward*, not
-        # who technically goes first on turn zero.
         self.turn_queue = TurnQueue()
         for entity in self.game_map.entities:
             self.turn_queue.schedule(entity, 0)
@@ -51,20 +55,11 @@ class Engine:
         self.game_map.explored |= self.game_map.visible
 
     def run(self, console: tcod.console.Console, context: tcod.context.Context) -> None:
-        """Main game loop: pop whoever's next in the turn queue and let
-        them act, then reschedule them based on their own action_cost.
-
-        We only render/present right before the player's turn - enemy
-        actions between player turns happen "silently" and their results
-        just show up the next time we render, same as the old
-        all-enemies-move-at-once behavior, just now spread across
-        individually-timed turns instead of a single batch.
-        """
         while True:
             entity, time = self.turn_queue.pop_next()
 
             if entity.fighter is None:
-                continue  # Dead (or fighter-less) entities drop out permanently.
+                continue
 
             if entity is self.player:
                 self.render(console)
@@ -76,26 +71,114 @@ class Engine:
             self.turn_queue.schedule(entity, time + cost)
 
     def await_player_action(self) -> int:
-        """Block until the player takes a valid action, then return its
-        tick cost. Invalid inputs (unrecognized keys, bumping a wall)
-        loop back around without costing a turn.
+        """
+        Block until the player's turn actually ends, then return its
+        tick cost.
+
+        Some inputs are "free" and loop back around without ending the
+        turn: opening/closing the inventory, unequipping (per the GDD,
+        removing gear costs nothing), and invalid moves. Equipping and
+        picking up items DO cost a turn, same as moving or attacking.
         """
         while True:
+            self.render_current_console_if_needed()  # see note below
+
             for event in tcod.event.wait():
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
 
-                if isinstance(event, tcod.event.KeyDown):
-                    if event.sym == tcod.event.KeySym.ESCAPE:
-                        raise SystemExit()
+                if not isinstance(event, tcod.event.KeyDown):
+                    continue
 
-                    if event.sym in MOVE_KEYS:
-                        dx, dy = MOVE_KEYS[event.sym]
-                        took_turn = self.player_action(dx, dy)
+                if event.sym == tcod.event.KeySym.ESCAPE:
+                    if self.game_state == "inventory":
+                        self.game_state = "playing"
+                        continue
+                    raise SystemExit()
 
-                        if took_turn:
-                            self.update_fov()
-                            return self.player.fighter.action_cost
+                if self.game_state == "inventory":
+                    self.handle_inventory_key(event.sym)
+                    continue
+
+                # game_state == "playing" from here down.
+                if event.sym == tcod.event.KeySym.I:
+                    self.game_state = "inventory"
+                    continue
+
+                if event.sym == tcod.event.KeySym.G:
+                    if self.try_pickup():
+                        return self.player.fighter.action_cost
+                    continue
+
+                if event.sym == tcod.event.KeySym.U:
+                    self.unequip_weapon()
+                    continue
+
+                if event.sym in MOVE_KEYS:
+                    dx, dy = MOVE_KEYS[event.sym]
+                    took_turn = self.player_action(dx, dy)
+                    if took_turn:
+                        self.update_fov()
+                        return self.player.fighter.action_cost
+
+    def render_current_console_if_needed(self) -> None:
+        """No-op placeholder - see the note below the code block for why
+        this exists and what to do about it."""
+        pass
+
+    def handle_inventory_key(self, sym) -> None:
+        if sym not in NUMBER_KEYS:
+            return
+
+        index = NUMBER_KEYS[sym]
+        if index >= len(self.player.inventory.items):
+            return
+
+        item = self.player.inventory.items[index]
+        self.equip_item(item)
+        self.game_state = "playing"
+
+    def try_pickup(self) -> bool:
+        target = self.game_map.get_item_at(self.player.x, self.player.y)
+        if target is None:
+            self.log.add("There's nothing here to pick up.")
+            return False
+
+        if self.player.inventory.is_full:
+            self.log.add("Your inventory is full.")
+            return False
+
+        self.player.inventory.add(target.item)
+        self.log.add(f"You pick up {target.item.name}.")
+        self.game_map.entities.remove(target)
+        return True
+
+    def equip_item(self, item) -> None:
+        if item.slot != "weapon":
+            self.log.add(f"{item.name} can't be equipped yet.")
+            return
+
+        previous = self.player.equipment.equip_weapon(item)
+        self.player.inventory.remove(item)
+        if previous is not None:
+            self.player.inventory.add(previous)
+            self.log.add(f"You equip {item.name}, stowing {previous.name}.")
+        else:
+            self.log.add(f"You equip {item.name}.")
+
+    def unequip_weapon(self) -> None:
+        previous = self.player.equipment.unequip_weapon()
+        if previous is None:
+            self.log.add("You have no weapon equipped.")
+            return
+
+        if not self.player.inventory.add(previous):
+            # Inventory full - re-equip rather than lose the item.
+            self.player.equipment.equip_weapon(previous)
+            self.log.add("No room in your inventory to unequip that.")
+            return
+
+        self.log.add(f"You unequip {previous.name}.")
 
     def player_action(self, dx: int, dy: int) -> bool:
         dest_x, dest_y = self.player.x + dx, self.player.y + dy
@@ -112,9 +195,6 @@ class Engine:
         return False
 
     def take_enemy_action(self, entity: Entity) -> int:
-        """Simple AI: attack the player if adjacent, otherwise wander.
-        Real pathing/behavior differences per enemy type come later.
-        """
         dist_x = abs(entity.x - self.player.x)
         dist_y = abs(entity.y - self.player.y)
         is_adjacent = dist_x <= 1 and dist_y <= 1 and (dist_x + dist_y) > 0
@@ -159,7 +239,10 @@ class Engine:
         console.clear()
         self.render_map(console)
         self.render_border(console)
-        self.render_sidebar(console)
+        if self.game_state == "inventory":
+            self.render_inventory(console)
+        else:
+            self.render_sidebar(console)
 
     def render_map(self, console: tcod.console.Console) -> None:
         gm = self.game_map
@@ -182,7 +265,7 @@ class Engine:
         for entity in gm.entities:
             if gm.visible[entity.x, entity.y]:
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
-            if entity is not self.player and entity.fighter is None:
+            if entity is not self.player and entity.fighter is None and entity.item is None:
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
 
     def render_border(self, console: tcod.console.Console) -> None:
@@ -199,6 +282,13 @@ class Engine:
         if self.player.fighter is not None:
             hp_text = f"HP: {self.player.fighter.hp}/{self.player.fighter.max_hp}"
             console.print(x=x, y=y, text=hp_text, fg=(255, 255, 255))
+        y += 1
+
+        weapon_name = self.player.equipment.weapon.name if self.player.equipment.weapon else "(none)"
+        console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
+        y += 1
+
+        console.print(x=x, y=y, text="[i]nventory  [g]et  [u]nequip", fg=(120, 120, 120))
         y += 2
 
         console.print(x=x, y=y, text="── Log ──", fg=(120, 120, 120))
@@ -212,3 +302,21 @@ class Engine:
         for line in wrapped_lines[-max_lines:]:
             console.print(x=x, y=y, text=line, fg=(200, 200, 200))
             y += 1
+
+    def render_inventory(self, console: tcod.console.Console) -> None:
+        x = self.sidebar_x
+        y = 1
+
+        console.print(x=x, y=y, text="Inventory", fg=(255, 255, 255))
+        y += 2
+
+        if not self.player.inventory.items:
+            console.print(x=x, y=y, text="(empty)", fg=(150, 150, 150))
+        else:
+            for i, item in enumerate(self.player.inventory.items):
+                line = f"{i + 1}. {item.name} (+{item.power_bonus} pwr)"
+                console.print(x=x, y=y, text=line, fg=item.color)
+                y += 1
+
+        y += 1
+        console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))

@@ -3,7 +3,10 @@ import tcod
 
 from fracture_point.dungeon_generator import generate_dungeon
 from fracture_point.entity import Entity
+from fracture_point.equipment import Equipment
 from fracture_point.fighter import Fighter
+from fracture_point.inventory import Inventory
+from fracture_point.item import Item
 from fracture_point.stats import Stats
 from fracture_point.engine import Engine
 
@@ -29,17 +32,20 @@ def main() -> None:
     )
 
     player_x, player_y = rooms[0].center
+    player_fighter = Fighter(
+        stats=Stats(strength=14, dexterity=12, intelligence=10, vitality=14, wisdom=10, luck=10),
+        base_power=3, base_defense=1, base_max_hp=6,
+    )
     player = Entity(
         x=player_x, y=player_y,
         char="@", color=(255, 255, 255), name="Player", blocks_movement=True,
-        fighter=Fighter(
-            stats=Stats(strength=14, dexterity=12, intelligence=10, vitality=14, wisdom=10, luck=10),
-            base_power=3, base_defense=1, base_max_hp=6,
-        ),
+        fighter=player_fighter,
+        inventory=Inventory(capacity=10),
+        equipment=Equipment(fighter=player_fighter),
     )
     game_map.entities.append(player)
 
-    for room in rooms[1:]:
+    for i, room in enumerate(rooms[1:], start=1):
         enemy_x, enemy_y = room.center
         enemy = Entity(
             x=enemy_x, y=enemy_y,
@@ -50,6 +56,16 @@ def main() -> None:
             ),
         )
         game_map.entities.append(enemy)
+
+        # Drop a weapon in every other room, just so there's stuff to find.
+        if i % 2 == 0:
+            item_x, item_y = room.x1 + 2, room.y1 + 2  # near a corner, not the center
+            dagger = Entity(
+                x=item_x, y=item_y,
+                char="/", color=(200, 200, 100), name="Dagger",
+                item=Item(name="Dagger", char="/", color=(200, 200, 100), slot="weapon", power_bonus=2),
+            )
+            game_map.entities.append(dagger)
 
     engine = Engine(game_map=game_map, player=player, sidebar_width=SIDEBAR_WIDTH)
 
