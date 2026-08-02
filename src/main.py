@@ -37,8 +37,9 @@ def build_run() -> Engine:
 
     player_x, player_y = rooms[0].center
     player_fighter = Fighter(
-        stats=Stats(strength=14, dexterity=12, intelligence=10, vitality=14, wisdom=10, luck=10),
+        stats=Stats(strength=14, dexterity=12, intelligence=12, vitality=14, wisdom=10, luck=10),
         base_power=3, base_defense=1, base_max_hp=6,
+        base_magic_power=2, base_magic_resist=0,
     )
     player_equipment = Equipment(fighter=player_fighter)
     player_inventory = Inventory(capacity=10)
@@ -94,6 +95,14 @@ def build_run() -> Engine:
                 item=Item(name="Ring of Fortitude", char="=", color=(220, 180, 60), slot_types=["ring"], defense_bonus=1),
             )
             game_map.entities.append(ring)
+            
+            wand_x, wand_y = room.x1 + 4, room.y1 + 2
+            wand = Entity(
+                x=wand_x, y=wand_y,
+                char="/", color=(120, 200, 220), name="Apprentice Wand",
+                item=Item(name="Apprentice Wand", char="/", color=(120, 200, 220), slot_types=["wand"], magic_power_bonus=3),
+            )
+            game_map.entities.append(wand)
 
     return Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
 

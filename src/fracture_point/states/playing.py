@@ -40,6 +40,10 @@ class PlayingState(GameState):
                 return engine.player.fighter.action_cost
             return None
 
+        if event.sym == tcod.event.KeySym.C:
+            return engine.attempt_cast()
+            
+        
         if event.sym == tcod.event.KeySym.U:
             engine.unequip_slot("weapon")
             return None

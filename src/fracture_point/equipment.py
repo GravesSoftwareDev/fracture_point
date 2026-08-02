@@ -91,3 +91,4 @@ class Equipment:
     def _apply_bonus(self, item: Item, sign: int) -> None:
         self.fighter.equipment_power_bonus += sign * item.power_bonus
         self.fighter.equipment_defense_bonus += sign * item.defense_bonus
+        self.fighter.equipment_magic_power_bonus += sign * item.magic_power_bonus

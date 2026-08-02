@@ -12,14 +12,16 @@ DEFAULT_SAVE = {
     }
 
 def _item_to_dict(item: Item) -> dict:
-    return{
+    return {
         "name": item.name,
         "char": item.char,
         "color": list(item.color),
         "slot_types": list(item.slot_types),
         "power_bonus": item.power_bonus,
+        "magic_power_bonus": item.magic_power_bonus,
         "defense_bonus": item.defense_bonus,
     }
+
 
 def _item_from_dict(data: dict) -> Item:
     return Item(
@@ -28,6 +30,7 @@ def _item_from_dict(data: dict) -> Item:
         color=tuple(data["color"]),
         slot_types=list(data["slot_types"]),
         power_bonus=data["power_bonus"],
+        magic_power_bonus=data.get("magic_power_bonus", 0),  # .get for saves made before this step
         defense_bonus=data["defense_bonus"],
     )
  

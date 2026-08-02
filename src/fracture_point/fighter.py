@@ -18,6 +18,11 @@ class Fighter:
     STRENGTH_MITIGATION_MAX_BONUS = 0.5
     STRENGTH_MITIGATION_K = 60
 
+    INTELLIGENCE_DAMAGE_MAX_BONUS = 1.5
+    INTELLIGENCE_DAMAGE_K = 40
+    INTELLIGENCE_RESIST_MAX_BONUS = 0.5
+    INTELLIGENCE_RESIST_K = 60
+
     HP_PER_VITALITY = 1
 
     BASE_ACTION_COST = 100
@@ -30,14 +35,22 @@ class Fighter:
         base_power: int,
         base_defense: int,
         base_max_hp: int,
+        base_magic_power: int=0,
+        base_magic_resist: int=0,
     ):
         self.stats = stats
         self.base_power = base_power
         self.base_defense = base_defense
         self.base_max_hp = base_max_hp
+        self.base_magic_power = base_magic_power
+        self.base_magic_resist = base_magic_resist
+
         self.equipment_power_bonus = 0
         self.equipment_defense_bonus = 0
+        self.equipment_magic_power_bonus = 0
+
         self.hp = self.max_hp
+
 
     @property
     def power(self) -> int:
@@ -54,6 +67,22 @@ class Fighter:
     def damage_reduction(self) -> float:
         return diminishing_bonus(
             self.stats.strength, self.STRENGTH_MITIGATION_MAX_BONUS, self.STRENGTH_MITIGATION_K
+        )
+
+    @property
+    def magic_power(self) -> int:
+        bonus = diminishing_bonus(
+            self.stats.intelligence, self.INTELLIGENCE_DAMAGE_MAX_BONUS, self.INTELLIGENCE_DAMAGE_K
+        )
+        return round((self.base_magic_power + self.equipment_magic_power_bonus) * (1 + bonus))
+
+    @property
+    def magic_resist(self) ->float:
+        """
+        Fraction of incoming magic damage negated. Purely stat driven for now.
+        """
+        return diminishing_bonus(
+            self.stats.intelligence, self.INTELLIGENCE_RESIST_MAX_BONUS, self.INTELLIGENCE_RESIST_K
         )
 
     @property

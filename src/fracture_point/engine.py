@@ -241,6 +241,62 @@ class Engine:
         if not defender.fighter.is_alive:
             self.die(defender)
 
+    def find_nearest_visible_enemy(self) -> Entity | None:
+        """
+        Auto target: nearest living enemy currently in the player's FOV.
+
+        This is currently the only targetting system for now. Manual selection comes later.
+        """
+
+        candidates = [
+            e for e in self.game_map.entities
+            if e is not self.player and e.fighter is not None
+            and e.fighter.is_alive and self.game_map.visible[e.x, e.y]
+        ]
+        if not candidates:
+            return None
+
+        return min(
+            candidates,
+            key=lambda e: max(abs(e.x - self.player.x), abs(e.y - self.player.y)),
+        )
+
+    def cast_bolt(self, caster: Entity, target: Entity) -> None:
+        """
+        A simple ranged magic attack: caster.magic_power vs target.magic_resist
+
+        currently auto targets closest enemy entity
+        """
+
+        raw_damage = caster.fighter.magic_power
+        damage = round(raw_damage*(1-target.fighter.magic_resist))
+
+        if damage > 0:
+            self.log.add(f"{caster.name} casts a bolt at {target.name} for {damage}.")
+            target.fighter.take_damage(damage)
+        else:
+            self.log.add(f"{caster.name}'s bolt fizzles against {target.name}")
+
+        if not target.fighter.is_alive:
+            self.die(target)
+
+    def attempt_cast(self) -> int | None:
+        """Handles the 'C' key: validates a wand is equipped and a
+        target exists, then casts. Returns the tick cost on a successful
+        cast, or None if nothing happened (no turn spent)."""
+        wand = self.player.equipment.equipped["wand"]
+        if wand is None:
+            self.log.add("You have no wand equipped.")
+            return None
+
+        target = self.find_nearest_visible_enemy()
+        if target is None:
+            self.log.add("No target in sight.")
+            return None
+
+        self.cast_bolt(self.player, target)
+        return self.player.fighter.action_cost
+    
     def die(self, entity: Entity) -> None:
         self.log.add(f"{entity.name} dies!")
         entity.blocks_movement = False
@@ -309,6 +365,10 @@ class Engine:
         weapon = self.player.equipment.equipped["weapon"]
         weapon_name = weapon.name if weapon else "(none)"
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
+        y += 1
+        wand = self.player.equipment.equipped["wand"]
+        wand_name = wand.name if wand else "(none)"
+        console.print(x=x, y=y, text=f"Wand: {wand_name}", fg=(180, 220, 220))
         y += 1
 
         console.print(x=x, y=y, text="[i]nv  [g]et  [u]nequip", fg=(120, 120, 120))
