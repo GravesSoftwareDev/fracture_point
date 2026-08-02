@@ -68,6 +68,8 @@ class Engine:
 
             if entity is self.player:
                 cost = self.await_player_turn(console, context)
+                if self.run_active:
+                    self.regen_gear_charge()
             else:
                 cost = self.take_enemy_action(entity)
 
@@ -288,14 +290,33 @@ class Engine:
         if wand is None:
             self.log.add("You have no wand equipped.")
             return None
+        gem = wand.socketed_active_gem()
+        if gem is None:
+            self.log.add(f"{wand.name} has no ability crystal socketed.")
+            return None
+
+        if not gem.can_cast():
+            self.log.add(f"{gem.name} doesn't ahve enough charge ({gem.current_charge})/({gem.max_charge}).")
 
         target = self.find_nearest_visible_enemy()
         if target is None:
             self.log.add("No target in sight.")
             return None
 
+        gem.consume()
         self.cast_bolt(self.player, target)
         return self.player.fighter.action_cost
+
+    def regen_gear_charge(self) -> None:
+        """
+        Regenerates charge on every socketed gem across all of the player's equipped items, once per player turn.
+        """
+        for item in self.player.equipment.equipped.values():
+            if item is None:
+                continue
+            for gem in item.sockets:
+                if gem is not None:
+                    gem.regen()
     
     def die(self, entity: Entity) -> None:
         self.log.add(f"{entity.name} dies!")
@@ -367,9 +388,16 @@ class Engine:
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
         y += 1
         wand = self.player.equipment.equipped["wand"]
-        wand_name = wand.name if wand else "(none)"
-        console.print(x=x, y=y, text=f"Wand: {wand_name}", fg=(180, 220, 220))
-        y += 1
+        if wand is None:
+            wand_text = "Wand: (none)"
+        else:
+            gem = wand.socketed_active_gem()
+            if gem is None:
+                wand_text = f"Wand: {wand.name} [no crystal]"
+            else:
+                wand_text = f"Wand: {wand.name}\n[{gem.name} {gem.current_charge}/{gem.max_charge}]"
+        console.print(x=x, y=y, text=wand_text, fg=(180, 220, 220))
+        y += 3
 
         console.print(x=x, y=y, text="[i]nv  [g]et  [u]nequip", fg=(120, 120, 120))
         y += 2

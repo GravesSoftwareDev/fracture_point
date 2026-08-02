@@ -5,6 +5,7 @@ import tcod
 from fracture_point.dungeon_generator import generate_dungeon
 from fracture_point.entity import Entity
 from fracture_point.equipment import Equipment
+from fracture_point.gem import Gem
 from fracture_point.fighter import Fighter
 from fracture_point.inventory import Inventory
 from fracture_point.item import Item
@@ -95,12 +96,20 @@ def build_run() -> Engine:
                 item=Item(name="Ring of Fortitude", char="=", color=(220, 180, 60), slot_types=["ring"], defense_bonus=1),
             )
             game_map.entities.append(ring)
-            
+
             wand_x, wand_y = room.x1 + 4, room.y1 + 2
+            spark_crystal = Gem(
+                name="Spark Crystal", char="*", color=(120, 200, 220),
+                max_charge=10, charge_per_turn=1, cast_cost=3,
+            )
             wand = Entity(
                 x=wand_x, y=wand_y,
                 char="/", color=(120, 200, 220), name="Apprentice Wand",
-                item=Item(name="Apprentice Wand", char="/", color=(120, 200, 220), slot_types=["wand"], magic_power_bonus=3),
+                item=Item(
+                    name="Apprentice Wand", char="/", color=(120, 200, 220),
+                    slot_types=["wand"], magic_power_bonus=3,
+                    gem_slots=1, sockets=[spark_crystal],
+                ),
             )
             game_map.entities.append(wand)
 

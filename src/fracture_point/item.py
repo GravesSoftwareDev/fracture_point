@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from fracture_point.gem import Gem
 
 @dataclass
 class Item:
@@ -20,3 +21,20 @@ class Item:
     power_bonus: int = 0
     magic_power_bonus: int = 0
     defense_bonus: int = 0
+    gem_slots: int = 0
+    sockets: list[Gem | None] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.sockets:
+            self.sockets = [None] * self.gem_slots
+
+    def socketed_active_gem(self) -> Gem | None:
+        """
+        First non-empty socket. Fine while items only ever have one meaningful socket - revisit when expanding socketing system.
+        """
+
+        for gem in self.sockets:
+            if gem is not None:
+                return gem
+
+        return None
