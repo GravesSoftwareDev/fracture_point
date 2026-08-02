@@ -278,8 +278,10 @@ class Engine:
         for entity in gm.entities:
             if gm.visible[entity.x, entity.y]:
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
-            if entity is not self.player and entity.fighter is None and entity.item is None:
-                console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
+            elif gm.explored[entity.x, entity.y] and entity.fighter is None:
+
+                dim_color = tuple(c // 2 for c in entity.color)
+                console.print(x=entity.x, y=entity.y, text=entity.char, fg=dim_color)
 
     def render_sidebar(self, console: tcod.console.Console) -> None:
         console.draw_frame(
