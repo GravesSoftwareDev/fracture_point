@@ -14,7 +14,10 @@ class GameMap:
         self.width = width
         self.height = height
         self.tiles = np.full((width, height), fill_value=fill_value, dtype=bool)
+        self.visible = np.full((width, height), fill_value=False, dtype=bool)
+        self.explored = np.full((width, height), fill_value=False, dtype=bool)
         self.entities: list[Entity] = []
+        
         if fill_value:
             self.tiles[0, :] = False
             self.tiles[width - 1, :] = False

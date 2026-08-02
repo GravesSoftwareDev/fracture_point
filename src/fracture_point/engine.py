@@ -1,6 +1,7 @@
 import random
 import textwrap
 
+import numpy as np
 import tcod
 
 from fracture_point.entity import Entity
@@ -18,6 +19,8 @@ MOVE_KEYS = {
     tcod.event.KeySym.D: (1, 0),
 }
 
+FOV_RADIUS = 8
+
 
 class Engine:
     def __init__(self, game_map: GameMap, player: Entity, sidebar_width: int = 24):
@@ -25,11 +28,27 @@ class Engine:
         self.player = player
         self.log = MessageLog()
 
-        # Layout: map fills x in [0, game_map.width). A 1-column border
-        # sits at x = game_map.width. The sidebar starts just after that.
         self.sidebar_width = sidebar_width
         self.border_x = self.game_map.width
         self.sidebar_x = self.border_x + 1
+
+        # Compute initial FOV so the starting room is visible before the
+        # player takes their first action.
+        self.update_fov()
+
+    def update_fov(self) -> None:
+        """Recompute which tiles are currently visible from the player,
+        and mark them as explored permanently.
+
+        tcod.map.compute_fov wants a transparency array - here, walls
+        (tiles == False) block sight, floors (True) don't.
+        """
+        self.game_map.visible[:] = tcod.map.compute_fov(
+            transparency=self.game_map.tiles,
+            pov=(self.player.x, self.player.y),
+            radius=FOV_RADIUS,
+        )
+        self.game_map.explored |= self.game_map.visible
 
     def handle_events(self) -> None:
         for event in tcod.event.wait():
@@ -45,6 +64,7 @@ class Engine:
                     took_turn = self.player_action(dx, dy)
 
                     if took_turn:
+                        self.update_fov()
                         self.process_enemy_turns()
 
     def player_action(self, dx: int, dy: int) -> bool:
@@ -112,13 +132,31 @@ class Engine:
         self.render_sidebar(console)
 
     def render_map(self, console: tcod.console.Console) -> None:
-        for x in range(self.game_map.width):
-            for y in range(self.game_map.height):
-                char = "." if self.game_map.tiles[x, y] else "#"
-                console.print(x=x, y=y, text=char, fg=(90, 90, 90))
+        gm = self.game_map
 
-        for entity in self.game_map.entities:
-            console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
+        for x in range(gm.width):
+            for y in range(gm.height):
+                if not gm.explored[x, y]:
+                    color = (20, 10, 20)
+                    base_char = "|"
+                else:
+                    base_char = "." if gm.tiles[x, y] else "#"
+
+                if gm.visible[x, y]:
+                    color = (200, 200, 200) if gm.tiles[x, y] else (130, 130, 130)
+                elif gm.explored[x, y]:
+                    # Explored but not currently visible: dim "remembered" look.
+                    color = (60, 60, 60) if gm.tiles[x, y] else (40, 40, 40)
+
+                console.print(x=x, y=y, text=base_char, fg=color)
+
+        # Only draw entities that are in the player's current FOV -
+        # otherwise you'd see enemies through walls / across the map.
+        for entity in gm.entities:
+            if gm.visible[entity.x, entity.y]:
+                console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
+            if entity is not self.player and entity.fighter is None:
+                console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
 
     def render_border(self, console: tcod.console.Console) -> None:
         for y in range(console.height):
@@ -139,14 +177,10 @@ class Engine:
         console.print(x=x, y=y, text="── Log ──", fg=(120, 120, 120))
         y += 1
 
-        # Wrap each message to the sidebar width, then print newest-last
-        # (reading top-to-bottom, oldest first) - same feel as before,
-        # just narrower and taller.
         wrapped_lines: list[str] = []
         for message in self.log.messages:
             wrapped_lines.extend(textwrap.wrap(message, width=self.sidebar_width))
 
-        # Only show as many lines as fit below the current y position.
         max_lines = console.height - y - 1
         for line in wrapped_lines[-max_lines:]:
             console.print(x=x, y=y, text=line, fg=(200, 200, 200))
