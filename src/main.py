@@ -15,7 +15,7 @@ from fracture_point.hub import run_hub_screen
 from fracture_point import save_data
 
 ASSETS_DIR = Path("assets")
-FONT_PATH = ASSETS_DIR / "IBM_Plex_Mono" / "IBMPlexMono-Regular.ttf"
+FONT_PATH = ASSETS_DIR / "IBM_Plex_Mono" / "IBMPlexMono-Bold.ttf"
 
 MAP_WIDTH = 90
 MAP_HEIGHT = 55
@@ -24,8 +24,8 @@ PANEL_WIDTH = 32
 SCREEN_WIDTH = MAP_WIDTH + PANEL_WIDTH
 SCREEN_HEIGHT = MAP_HEIGHT
 
-TILE_WIDTH = 10
-TILE_HEIGHT = 18
+TILE_WIDTH = 14
+TILE_HEIGHT = 24
 
 
 def build_run() -> Engine:
@@ -125,6 +125,7 @@ def main() -> None:
         tileset=tileset,
         title="Fracture Point",
         vsync=True,
+        sdl_window_flags=tcod.context.SDL_WINDOW_RESIZABLE,
     ) as context:
         console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT, order="F")
 

@@ -50,7 +50,7 @@ def run_hub_screen(console: tcod.console.Console, context: tcod.context.Context)
         y+=2
         console.print(x=x,y=y,text="(Crafting/shop coming soon.)", fg=(90,90,90))
 
-        context.present(console)
+        context.present(console, keep_aspect=True, integer_scaling=False)
 
         for event in tcod.event.wait():
             if isinstance(event, tcod.event.Quit):

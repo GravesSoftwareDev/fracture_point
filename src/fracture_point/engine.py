@@ -88,7 +88,7 @@ class Engine:
         """
         while True:
             self.render(console)
-            context.present(console)
+            context.present(console, keep_aspect=True, integer_scaling=False)
 
             for event in tcod.event.wait():
                 if isinstance(event, tcod.event.Quit):
@@ -116,7 +116,7 @@ class Engine:
     def await_player_turn(self, console: tcod.console.Console, context: tcod.context.Context) -> int:
         while True:
             self.render(console)
-            context.present(console)
+            context.present(console, keep_aspect=True, integer_scaling=False)
 
             for event in tcod.event.wait():
                 if isinstance(event, tcod.event.Quit):
