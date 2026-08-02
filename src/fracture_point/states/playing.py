@@ -21,8 +21,7 @@ class PlayingState(GameState):
     up items, and opening the inventory overlay."""
 
     name = "playing"
-    linked_states = frozenset({"inventory"})
-
+    linked_states = frozenset({"inventory", "run_end"})
     def handle_event(self, event: tcod.event.Event) -> int | None:
         if not isinstance(event, tcod.event.KeyDown):
             return None

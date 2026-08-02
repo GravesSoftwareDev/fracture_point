@@ -99,5 +99,5 @@ def generate_dungeon(
                 dungeon.tiles[tx, ty] = True
 
         rooms.append(new_room)
-
+    dungeon.stairs = rooms[-1].center
     return dungeon, rooms

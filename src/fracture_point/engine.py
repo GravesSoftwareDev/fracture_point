@@ -7,10 +7,12 @@ from fracture_point.entity import Entity
 from fracture_point.game_map import GameMap
 from fracture_point.message_log import MessageLog
 from fracture_point.turn_queue import TurnQueue
+from fracture_point import save_data
+from fracture_point.pathfinding import compute_path
 from fracture_point.states.state_manager import StateManager
 from fracture_point.states.playing import PlayingState
 from fracture_point.states.inventory import InventoryState
-from fracture_point.pathfinding import compute_path
+from fracture_point.states.run_end import RunEndState
 
 FOV_RADIUS = 8
 
@@ -21,10 +23,6 @@ class Engine:
         self.player = player
         self.log = MessageLog()
 
-        # The map and side panel are now fully independent consoles,
-        # composited together in render(). This replaces the old
-        # shared-console-plus-manual-x-offset approach, and lets the
-        # panel draw its own frame/title so it reads as its own window.
         self.map_console = tcod.console.Console(self.game_map.width, self.game_map.height, order="F")
         self.panel_width = panel_width
         self.panel_console = tcod.console.Console(panel_width, self.game_map.height, order="F")
@@ -36,7 +34,20 @@ class Engine:
         self.states = StateManager()
         self.states.register(PlayingState(self))
         self.states.register(InventoryState(self))
+        self.states.register(RunEndState(self))
         self.states.start("playing")
+
+        # Meta-progression: load whatever currency persisted from
+        # previous runs. gold_collected tracks only THIS run's take,
+        # so the run-end screen can show both "earned this run" and
+        # "total banked" separately.
+        save = save_data.load_save()
+        self.currency_at_start = save["currency"]
+        self.gold_collected = 0
+
+        self.run_active = True
+        self.run_outcome: str | None = None  # "died" | "escaped"
+        self.final_currency = self.currency_at_start
 
         self.update_fov()
 
@@ -49,7 +60,7 @@ class Engine:
         self.game_map.explored |= self.game_map.visible
 
     def run(self, console: tcod.console.Console, context: tcod.context.Context) -> None:
-        while True:
+        while self.run_active:
             entity, time = self.turn_queue.pop_next()
 
             if entity.fighter is None:
@@ -60,7 +71,38 @@ class Engine:
             else:
                 cost = self.take_enemy_action(entity)
 
+            if not self.run_active:
+                break  # Death/extraction happened mid-turn - don't reschedule.
+
             self.turn_queue.schedule(entity, time + cost)
+
+        self.show_run_end_screen(console, context)
+
+    def show_run_end_screen(self, console: tcod.console.Console, context: tcod.context.Context) -> None:
+        """
+        Displays the terminal run_end state and waits for any key to
+        quit. This is intentionally simple - once a Hub state exists,
+        this is where we'd transition there instead of exiting.
+        """
+        while True:
+            self.render(console)
+            context.present(console)
+
+            for event in tcod.event.wait():
+                if isinstance(event, tcod.event.Quit):
+                    raise SystemExit()
+                if isinstance(event, tcod.event.KeyDown):
+                    raise SystemExit()
+
+    def end_run(self, outcome: str) -> None:
+        """Called once, exactly when a run stops (death or reaching the
+        stairs). Banks this run's gold into the persistent save and
+        moves to the terminal run_end state."""
+        self.run_outcome = outcome
+        self.run_active = False
+        self.final_currency = self.currency_at_start + self.gold_collected
+        save_data.save_currency(self.final_currency)
+        self.states.replace("run_end")
 
     def await_player_turn(self, console: tcod.console.Console, context: tcod.context.Context) -> int:
         while True:
@@ -130,20 +172,27 @@ class Engine:
             self.attack(self.player, target)
             return True
 
-        if self.game_map.is_walkable(dest_x, dest_y):
-            self.player.move(dx, dy)
-            return True
+        if not self.game_map.is_walkable(dest_x, dest_y):
+            return False
 
-        return False
+        self.player.move(dx, dy)
+
+        # Auto-pickup gold - free, no separate 'g' press needed, unlike
+        # gear items. Checked right after a successful move.
+        gold_entity = self.game_map.get_gold_at(dest_x, dest_y)
+        if gold_entity is not None:
+            self.gold_collected += gold_entity.gold_value
+            self.log.add(f"You find {gold_entity.gold_value} gold.")
+            self.game_map.entities.remove(gold_entity)
+
+        # Reaching the stairs ends the run successfully.
+        if self.game_map.stairs == (dest_x, dest_y):
+            self.log.add("You found the stairs and escaped with your loot!")
+            self.end_run("escaped")
+
+        return True
 
     def take_enemy_action(self, entity: Entity) -> int:
-        """
-        Attack if adjacent. Otherwise, check whether this entity can
-        currently see the player (its own FOV, from its own position,
-        using its own perception_radius) - if so, path toward the
-        player. If not, fall back to the old random wander so
-        not-yet-aggroed enemies still feel alive rather than frozen.
-        """
         dist_x = abs(entity.x - self.player.x)
         dist_y = abs(entity.y - self.player.y)
         is_adjacent = dist_x <= 1 and dist_y <= 1 and (dist_x + dist_y) > 0
@@ -164,10 +213,6 @@ class Engine:
                 next_x, next_y = path[0]
                 if self.game_map.is_walkable(next_x, next_y):
                     entity.move(next_x - entity.x, next_y - entity.y)
-                # If the next path tile is blocked (another entity is
-                # standing there), the enemy just waits this turn rather
-                # than trying to path around - fine for now with small
-                # enemy counts; worth revisiting if enemies ever cluster.
         else:
             dx, dy = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0), (0, 0)])
             dest_x, dest_y = entity.x + dx, entity.y + dy
@@ -197,18 +242,10 @@ class Engine:
         entity.fighter = None
 
         if entity is self.player:
-            self.log.add("You died. Press any key to exit.")
-            for event in tcod.event.wait():
-                if isinstance(event, tcod.event.KeyDown):
-                    raise SystemExit()
+            self.log.add("You have died.")
+            self.end_run("died")
 
     def render(self, console: tcod.console.Console) -> None:
-        """
-        Composites the map and panel consoles onto the actual screen
-        console. Each sub-console is cleared and redrawn by the current
-        state, then blitted side by side - map on the left, panel on
-        the right.
-        """
         self.map_console.clear()
         self.panel_console.clear()
 
@@ -226,13 +263,15 @@ class Engine:
                 if not gm.explored[x, y]:
                     color = (50, 10, 40)
                     base_char = "|"
+                elif gm.stairs == (x, y):
+                    base_char = ">"
+                    color = (230, 200, 80) if gm.visible[x, y] else (110, 95, 40)
                 else:
                     base_char = "." if gm.tiles[x, y] else "#"
-
-                if gm.visible[x, y]:
-                    color = (200, 200, 200) if gm.tiles[x, y] else (130, 130, 130)
-                elif gm.explored[x, y]:
-                    color = (60, 60, 60) if gm.tiles[x, y] else (40, 40, 40)
+                    if gm.visible[x, y]:
+                        color = (200, 200, 200) if gm.tiles[x, y] else (130, 130, 130)
+                    else:
+                        color = (60, 60, 60) if gm.tiles[x, y] else (40, 40, 40)
 
                 console.print(x=x, y=y, text=base_char, fg=color)
 
@@ -255,6 +294,9 @@ class Engine:
             console.print(x=x, y=y, text=hp_text, fg=(255, 255, 255))
         y += 1
 
+        console.print(x=x, y=y, text=f"Gold: {self.gold_collected}", fg=(230, 200, 80))
+        y += 1
+
         weapon = self.player.equipment.equipped["weapon"]
         weapon_name = weapon.name if weapon else "(none)"
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
@@ -266,12 +308,12 @@ class Engine:
         console.print(x=x, y=y, text="── Log ──", fg=(120, 120, 120))
         y += 1
 
-        content_width = console.width - 4  # inset from the frame on both sides
+        content_width = console.width - 4
         wrapped_lines: list[str] = []
         for message in self.log.messages:
             wrapped_lines.extend(textwrap.wrap(message, width=content_width))
 
-        max_lines = console.height - y - 2  # leave room for the frame's bottom edge
+        max_lines = console.height - y - 2
         for line in wrapped_lines[-max_lines:]:
             console.print(x=x, y=y, text=line, fg=(200, 200, 200))
             y += 1
@@ -294,3 +336,20 @@ class Engine:
 
         y += 1
         console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
+
+    def render_run_end(self, console: tcod.console.Console) -> None:
+        title = "You Escaped" if self.run_outcome == "escaped" else "You Died"
+        console.draw_frame(
+            x=0, y=0, width=console.width, height=console.height, fg=(180, 180, 180), bg=(0, 0, 0),
+        )
+
+        x, y = 2, 2
+        console.print(x=x, y=y, text=f"Gold found this run: {self.gold_collected}", fg=(230, 200, 80))
+        y += 1
+        console.print(x=x, y=y, text=f"Total gold banked: {self.final_currency}", fg=(230, 200, 80))
+        y += 2
+        console.print(x=x, y=y, text="Your gear is lost.", fg=(150, 150, 150))
+        y += 2
+        console.print(x=x, y=y, text="Press any key to quit.", fg=(120, 120, 120))
+        y += 1
+        console.print(x=x, y=y, text="(No hub to return to yet!)", fg=(90, 90, 90))

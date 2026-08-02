@@ -1,5 +1,6 @@
 from pathlib import Path
 import tcod
+import random
 
 from fracture_point.dungeon_generator import generate_dungeon
 from fracture_point.entity import Entity
@@ -57,6 +58,14 @@ def main() -> None:
         )
         game_map.entities.append(enemy)
 
+        gold_x, gold_y = room.x1 + 1, room.y1 + 1
+        gold_pile = Entity(
+            x=gold_x, y=gold_y,
+            char="$", color=(230, 200, 80), name="Gold",
+            gold_value=random.randint(5, 20),
+        )
+        game_map.entities.append(gold_pile)
+
         if i % 2 == 0:
             item_x, item_y = room.x1 + 2, room.y1 + 2
             dagger = Entity(
@@ -85,7 +94,7 @@ def main() -> None:
     ) as context:
         console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT, order="F")
         engine.run(console, context)
-
+    
 
 if __name__ == "__main__":
     main()
