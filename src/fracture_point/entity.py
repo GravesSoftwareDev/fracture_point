@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from fracture_point.consumable import Consumable
 from fracture_point.equipment import Equipment
 from fracture_point.fighter import Fighter
+from fracture_point.gem import Gem
 from fracture_point.inventory import Inventory
 from fracture_point.item import Item
-from fracture_point.gem import Gem
 
 
 class Entity:
@@ -25,6 +26,7 @@ class Entity:
         perception_radius: int = 6,
         gold_value: int | None = None,
         gem: Gem | None = None,
+        consumable: Consumable | None = None,
     ):
         self.x = x
         self.y = y
@@ -39,6 +41,7 @@ class Entity:
         self.perception_radius = perception_radius
         self.gold_value = gold_value
         self.gem = gem
+        self.consumable = consumable
 
     def move(self, dx: int, dy: int) -> None:
         self.x += dx

@@ -10,6 +10,7 @@ SAVE_PATH = Path("saves") / "save.json"
 
 DEFAULT_SAVE = {
     "currency": 0,
+    "known_properties": [],
     "gear": {"equipped": {}, "inventory": [], "loose_gems": []},
 }
 
@@ -49,6 +50,8 @@ def _item_to_dict(item: Item) -> dict:
         "defense_bonus": item.defense_bonus,
         "gem_slots": item.gem_slots,
         "sockets": [(_gem_to_dict(g) if g is not None else None) for g in item.sockets],
+        "base_name": item.base_name,
+        "identify_property": item.identify_property,
     }
 
 
@@ -67,6 +70,8 @@ def _item_from_dict(data: dict) -> Item:
         defense_bonus=data["defense_bonus"],
         gem_slots=gem_slots,
         sockets=sockets,
+        base_name=data.get("base_name", ""),
+        identify_property=data.get("identify_property"),
     )
 
 
@@ -96,7 +101,16 @@ def save_currency(amount: int) -> None:
     _write(data)
 
 
-def save_gear(equipped: dict[str, Item | None], inventory_items: list[Item], inventory_gems: list[Gem]) -> None:
+def save_known_properties(known_properties: set[str]) -> None:
+    """Written immediately whenever a property is identified - this is
+    permanent knowledge, unlike gear, so it's never wiped on death and
+    doesn't wait for run end to save."""
+    data = load_save()
+    data["known_properties"] = sorted(known_properties)
+    _write(data)
+
+
+def save_gear(equipped: dict[str, Item | None], inventory_items: list[Item], inventory_gems: list) -> None:
     data = load_save()
     data["gear"] = {
         "equipped": {
@@ -114,7 +128,7 @@ def clear_gear() -> None:
     _write(data)
 
 
-def load_gear() -> tuple[dict[str, Item], list[Item], list[Gem]]:
+def load_gear() -> tuple[dict[str, Item], list[Item], list]:
     data = load_save()
     equipped = {
         slot_id: _item_from_dict(item_data)

@@ -13,6 +13,7 @@ from fracture_point.stats import Stats
 from fracture_point.engine import Engine
 from fracture_point.hub import run_hub_screen
 from fracture_point import save_data
+from fracture_point.consumable import Consumable
 
 ASSETS_DIR = Path("assets")
 FONT_PATH = ASSETS_DIR / "IBM_Plex_Mono" / "IBMPlexMono-Bold.ttf"
@@ -122,6 +123,26 @@ def build_run() -> Engine:
                 gem=ember_crystal,
             )
             game_map.entities.append(ember_entity)
+
+            flame_ring_x, flame_ring_y = room.x1 + 6, room.y1 + 2
+            flame_ring = Entity(
+                x=flame_ring_x, y=flame_ring_y,
+                char="=", color=(220, 100, 60), name="Ring of Flame",
+                item=Item(
+                    name="Ring of Flame", char="=", color=(220, 100, 60),
+                    slot_types=["ring"], defense_bonus=2,
+                    base_name="Ring", identify_property="flame",
+                ),
+            )
+            game_map.entities.append(flame_ring)
+
+            scroll_x, scroll_y = room.x1 + 1, room.y1 + 3
+            scroll_entity = Entity(
+                x=scroll_x, y=scroll_y,
+                char="?", color=(230, 230, 180), name="Identify Scroll",
+                consumable=Consumable(name="Identify Scroll", char="?", color=(230, 230, 180), kind="identify"),
+            )
+            game_map.entities.append(scroll_entity)
 
     return Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
 

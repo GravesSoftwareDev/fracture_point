@@ -14,6 +14,7 @@ from fracture_point.states.playing import PlayingState
 from fracture_point.states.inventory import InventoryState
 from fracture_point.states.run_end import RunEndState
 from fracture_point.states.socketing import SocketingState
+from fracture_point.states.identify import IdentifyState
 
 FOV_RADIUS = 8
 
@@ -37,6 +38,7 @@ class Engine:
         self.states.register(InventoryState(self))
         self.states.register(RunEndState(self))
         self.states.register(SocketingState(self))
+        self.states.register(IdentifyState(self))
         self.states.start("playing")
 
         # Meta-progression: load whatever currency persisted from
@@ -44,6 +46,7 @@ class Engine:
         # so the run-end screen can show both "earned this run" and
         # "total banked" separately.
         save = save_data.load_save()
+        self.known_properties: set[str] = set(save.get("known_properties", []))
         self.currency_at_start = save["currency"]
         self.gold_collected = 0
 
@@ -145,6 +148,16 @@ class Engine:
             self.game_map.entities.remove(gem_target)
             return True
 
+        consumable_target = self.game_map.get_consumable_at(self.player.x, self.player.y)
+        if consumable_target is not None:
+            if self.player.inventory.consumables_full:
+                self.log.add("No room to carry another consumable.")
+                return False
+            self.player.inventory.add_consumable(consumable_target.consumable)
+            self.log.add(f"You pick up {consumable_target.consumable.name}.")
+            self.game_map.entities.remove(consumable_target)
+            return True
+
         target = self.game_map.get_item_at(self.player.x, self.player.y)
         if target is None:
             self.log.add("There's nothing here to pick up.")
@@ -159,22 +172,41 @@ class Engine:
         self.game_map.entities.remove(target)
         return True
 
+    def attempt_identify(self, item) -> None:
+        """
+        Consumes one Identify Scroll (if the player has one) to
+        reveal item's property. Preperty identification is permanent
+        and global. Since it's knowledge, it isn't lost at the end of a run like gear.
+        """
+        scroll = next((c for c in self.player.inventory.consumables if c.kind == "identify"), None)
+
+        if scroll is None:
+            self.log.add("You have no identify scroll.")
+            return
+
+        self.player.inventory.remove_consumable(scroll)
+        self.known_properties.add(item.identify_property)
+        save_data.save_known_properties(self.known_properties)
+
+        self.log.add(f"It's {item.name}!")
+
     def equip_item(self, item) -> None:
         candidate_slots = self.player.equipment.empty_slots_for(item)
 
         if not candidate_slots:
-            self.log.add(f"No open slot for {item.name}.")
+            self.log.add(f"No open slot for {item.display_name(self.known_properties)}.")
             return
 
         slot_id = candidate_slots[0]
         previous = self.player.equipment.equip(item, slot_id)
         self.player.inventory.remove(item)
 
+        display = item.display_name(self.known_properties)
         if previous is not None:
             self.player.inventory.add(previous)
-            self.log.add(f"You equip {item.name} ({slot_id}), stowing {previous.name}.")
+            self.log.add(f"You equip {display} ({slot_id}), stowing {previous.display_name(self.known_properties)}.")
         else:
-            self.log.add(f"You equip {item.name} ({slot_id}).")
+            self.log.add(f"You equip {display} ({slot_id}).")
 
     def unequip_slot(self, slot_id: str) -> None:
         previous = self.player.equipment.unequip(slot_id)
@@ -187,7 +219,7 @@ class Engine:
             self.log.add("No room in your inventory to unequip that.")
             return
 
-        self.log.add(f"You unequip {previous.name} ({slot_id}).")
+        self.log.add(f"You unequip {previous.display_name(self.known_properties)} ({slot_id}).")
 
     def socket_gem(self, gem, item) -> None:
         """
@@ -414,20 +446,22 @@ class Engine:
         y += 1
 
         weapon = self.player.equipment.equipped["weapon"]
-        weapon_name = weapon.name if weapon else "(none)"
+        weapon_name = weapon.display_name(self.known_properties) if weapon else "(none)"
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
         y += 1
+
         wand = self.player.equipment.equipped["wand"]
         if wand is None:
             wand_text = "Wand: (none)"
         else:
             gem = wand.socketed_active_gem()
+            wand_name = wand.display_name(self.known_properties)
             if gem is None:
-                wand_text = f"Wand: {wand.name} [no crystal]"
+                wand_text = f"Wand: {wand_name} [no crystal]"
             else:
-                wand_text = f"Wand: {wand.name}\n[{gem.name} {gem.current_charge}/{gem.max_charge}]"
+                wand_text = f"Wand: {wand_name} [{gem.name} {gem.current_charge}/{gem.max_charge}]"
         console.print(x=x, y=y, text=wand_text, fg=(180, 220, 220))
-        y += 3
+        y += 1
 
         console.print(x=x, y=y, text="[i]nv  [g]et  [u]nequip", fg=(120, 120, 120))
         y += 2
@@ -457,14 +491,16 @@ class Engine:
             console.print(x=x, y=y, text="(empty)", fg=(150, 150, 150))
         else:
             for i, item in enumerate(self.player.inventory.items):
-                line = f"{i + 1}. {item.name} (+{item.power_bonus} pwr)"
+                line = f"{i + 1}. {item.inventory_label(self.known_properties)}"
                 console.print(x=x, y=y, text=line, fg=item.color)
                 y += 1
 
         y += 1
-        console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
-        y += 1
         console.print(x=x, y=y, text="[s] socket a crystal", fg=(120, 120, 120))
+        y += 1
+        console.print(x=x, y=y, text="[r] read identify scroll", fg=(120, 120, 120))
+        y += 1
+        console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))
 
     def render_socketing(self, console: tcod.console.Console, step: str, socketable_items: list) -> None:
         title = "Socket: Choose Item" if step == "choose_item" else "Socket: Choose Gem"
@@ -479,7 +515,7 @@ class Engine:
                 console.print(x=x, y=y, text="(nothing has an open socket)", fg=(150,150,150))
             else:
                 for i, item in enumerate(socketable_items):
-                    line = f"{i + 1}. {item.name}"
+                    line = f"{i + 1}. {item.display_name(self.known_properties)}"
                     console.print(x=x, y=y, text=line, fg=item.color)
                     y+=1
         else:
@@ -517,3 +553,26 @@ class Engine:
 
         console.print(x=x, y=y, text="Press any key to return to the Hub.", fg=(120, 120, 120))
         y += 1
+
+    def render_identify(self, console: tcod.console.Console, unidentified_items: list) -> None:
+            console.draw_frame(
+                x=0, y=0, width=console.width, height=console.height,
+                title="Read Scroll", fg=(180, 180, 180), bg=(0, 0, 0),
+            )
+
+            x, y = 2, 2
+
+            scroll_count = sum(1 for c in self.player.inventory.consumables if c.kind == "identify")
+            console.print(x=x, y=y, text=f"Identify Scrolls: {scroll_count}", fg=(200, 200, 220))
+            y += 2
+
+            if not unidentified_items:
+                console.print(x=x, y=y, text="(nothing unidentified)", fg=(150, 150, 150))
+            else:
+                for i, item in enumerate(unidentified_items):
+                    line = f"{i + 1}. {item.display_name(self.known_properties)}"
+                    console.print(x=x, y=y, text=line, fg=item.color)
+                    y += 1
+
+            y += 1
+            console.print(x=x, y=y, text="[esc] back", fg=(120, 120, 120))     

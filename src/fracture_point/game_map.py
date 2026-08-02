@@ -58,3 +58,9 @@ class GameMap:
             if entity.gem is not None and entity.x == x and entity.y == y:
                 return entity
         return None
+
+    def get_consumable_at(self, x: int, y: int) -> Entity | None:
+        for entity in self.entities:
+            if entity.consumable is not None and entity.x == x and entity.y == y:
+                return entity
+        return None
