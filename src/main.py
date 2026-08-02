@@ -45,7 +45,7 @@ def main() -> None:
             x=enemy_x, y=enemy_y,
             char="r", color=(200, 80, 80), name="Rat", blocks_movement=True,
             fighter=Fighter(
-                stats=Stats(strength=6, dexterity=8, intelligence=4, vitality=6, wisdom=4, luck=8),
+                stats=Stats(strength=6, dexterity=16, intelligence=4, vitality=6, wisdom=4, luck=8),
                 base_power=2, base_defense=0, base_max_hp=0,
             ),
         )
@@ -61,11 +61,7 @@ def main() -> None:
         vsync=True,
     ) as context:
         console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT, order="F")
-
-        while True:
-            engine.render(console)
-            context.present(console)
-            engine.handle_events()
+        engine.run(console, context)
 
 
 if __name__ == "__main__":

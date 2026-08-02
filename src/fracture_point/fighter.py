@@ -15,6 +15,10 @@ class Fighter:
 
     HP_PER_VITALITY = 1
 
+    BASE_ACTION_COST = 100
+    DEXTERITY_SPEED_MAX_BONUS = 0.8
+    DEXTERITY_SPEED_K = 40
+
     def __init__(self, stats: Stats, base_power: int, base_defense: int, base_max_hp: int):
             self.stats = stats
             self.base_power = base_power
@@ -50,7 +54,15 @@ class Fighter:
         Max HP is the base max HP modified by the vitality stat.
         """
         return self.base_max_hp + (self.stats.vitality * self.HP_PER_VITALITY)
-    
+
+    @property
+    def action_cost(self) -> int:
+        """
+        Ticks consumed by this entity's next action. Lower = acts more often.
+        """
+        bonus = diminishing_bonus(self.stats.dexterity, self.DEXTERITY_SPEED_MAX_BONUS, self.DEXTERITY_SPEED_K)
+        return round(self.BASE_ACTION_COST * (1 + bonus))
+
     @property
     def is_alive(self) -> bool:
         return self.hp > 0

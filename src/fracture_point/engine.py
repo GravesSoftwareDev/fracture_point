@@ -1,12 +1,12 @@
 import random
 import textwrap
 
-import numpy as np
 import tcod
 
 from fracture_point.entity import Entity
 from fracture_point.game_map import GameMap
 from fracture_point.message_log import MessageLog
+from fracture_point.turn_queue import TurnQueue
 
 MOVE_KEYS = {
     tcod.event.KeySym.UP: (0, -1),
@@ -32,17 +32,17 @@ class Engine:
         self.border_x = self.game_map.width
         self.sidebar_x = self.border_x + 1
 
-        # Compute initial FOV so the starting room is visible before the
-        # player takes their first action.
+        # Every entity starts scheduled at time 0. Order among them at
+        # the same time is just insertion order (see TurnQueue), which
+        # is fine - it only matters who's *fastest going forward*, not
+        # who technically goes first on turn zero.
+        self.turn_queue = TurnQueue()
+        for entity in self.game_map.entities:
+            self.turn_queue.schedule(entity, 0)
+
         self.update_fov()
 
     def update_fov(self) -> None:
-        """Recompute which tiles are currently visible from the player,
-        and mark them as explored permanently.
-
-        tcod.map.compute_fov wants a transparency array - here, walls
-        (tiles == False) block sight, floors (True) don't.
-        """
         self.game_map.visible[:] = tcod.map.compute_fov(
             transparency=self.game_map.tiles,
             pov=(self.player.x, self.player.y),
@@ -50,22 +50,52 @@ class Engine:
         )
         self.game_map.explored |= self.game_map.visible
 
-    def handle_events(self) -> None:
-        for event in tcod.event.wait():
-            if isinstance(event, tcod.event.Quit):
-                raise SystemExit()
+    def run(self, console: tcod.console.Console, context: tcod.context.Context) -> None:
+        """Main game loop: pop whoever's next in the turn queue and let
+        them act, then reschedule them based on their own action_cost.
 
-            if isinstance(event, tcod.event.KeyDown):
-                if event.sym == tcod.event.KeySym.ESCAPE:
+        We only render/present right before the player's turn - enemy
+        actions between player turns happen "silently" and their results
+        just show up the next time we render, same as the old
+        all-enemies-move-at-once behavior, just now spread across
+        individually-timed turns instead of a single batch.
+        """
+        while True:
+            entity, time = self.turn_queue.pop_next()
+
+            if entity.fighter is None:
+                continue  # Dead (or fighter-less) entities drop out permanently.
+
+            if entity is self.player:
+                self.render(console)
+                context.present(console)
+                cost = self.await_player_action()
+            else:
+                cost = self.take_enemy_action(entity)
+
+            self.turn_queue.schedule(entity, time + cost)
+
+    def await_player_action(self) -> int:
+        """Block until the player takes a valid action, then return its
+        tick cost. Invalid inputs (unrecognized keys, bumping a wall)
+        loop back around without costing a turn.
+        """
+        while True:
+            for event in tcod.event.wait():
+                if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
 
-                if event.sym in MOVE_KEYS and self.player.fighter.is_alive:
-                    dx, dy = MOVE_KEYS[event.sym]
-                    took_turn = self.player_action(dx, dy)
+                if isinstance(event, tcod.event.KeyDown):
+                    if event.sym == tcod.event.KeySym.ESCAPE:
+                        raise SystemExit()
 
-                    if took_turn:
-                        self.update_fov()
-                        self.process_enemy_turns()
+                    if event.sym in MOVE_KEYS:
+                        dx, dy = MOVE_KEYS[event.sym]
+                        took_turn = self.player_action(dx, dy)
+
+                        if took_turn:
+                            self.update_fov()
+                            return self.player.fighter.action_cost
 
     def player_action(self, dx: int, dy: int) -> bool:
         dest_x, dest_y = self.player.x + dx, self.player.y + dy
@@ -80,6 +110,24 @@ class Engine:
             return True
 
         return False
+
+    def take_enemy_action(self, entity: Entity) -> int:
+        """Simple AI: attack the player if adjacent, otherwise wander.
+        Real pathing/behavior differences per enemy type come later.
+        """
+        dist_x = abs(entity.x - self.player.x)
+        dist_y = abs(entity.y - self.player.y)
+        is_adjacent = dist_x <= 1 and dist_y <= 1 and (dist_x + dist_y) > 0
+
+        if is_adjacent and self.player.fighter.is_alive:
+            self.attack(entity, self.player)
+        else:
+            dx, dy = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0), (0, 0)])
+            dest_x, dest_y = entity.x + dx, entity.y + dy
+            if (dx, dy) != (0, 0) and self.game_map.is_walkable(dest_x, dest_y):
+                entity.move(dx, dy)
+
+        return entity.fighter.action_cost
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
         raw_damage = max(0, attacker.fighter.power - defender.fighter.defense)
@@ -107,25 +155,6 @@ class Engine:
                 if isinstance(event, tcod.event.KeyDown):
                     raise SystemExit()
 
-    def process_enemy_turns(self) -> None:
-        for entity in self.game_map.entities:
-            if entity is self.player or entity.fighter is None:
-                continue
-
-            dist_x = abs(entity.x - self.player.x)
-            dist_y = abs(entity.y - self.player.y)
-            is_adjacent = dist_x <= 1 and dist_y <= 1 and (dist_x + dist_y) > 0
-
-            if is_adjacent and self.player.fighter.is_alive:
-                self.attack(entity, self.player)
-                continue
-
-            dx, dy = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0), (0, 0)])
-            dest_x, dest_y = entity.x + dx, entity.y + dy
-
-            if (dx, dy) != (0, 0) and self.game_map.is_walkable(dest_x, dest_y):
-                entity.move(dx, dy)
-
     def render(self, console: tcod.console.Console) -> None:
         console.clear()
         self.render_map(console)
@@ -146,13 +175,10 @@ class Engine:
                 if gm.visible[x, y]:
                     color = (200, 200, 200) if gm.tiles[x, y] else (130, 130, 130)
                 elif gm.explored[x, y]:
-                    # Explored but not currently visible: dim "remembered" look.
                     color = (60, 60, 60) if gm.tiles[x, y] else (40, 40, 40)
 
                 console.print(x=x, y=y, text=base_char, fg=color)
 
-        # Only draw entities that are in the player's current FOV -
-        # otherwise you'd see enemies through walls / across the map.
         for entity in gm.entities:
             if gm.visible[entity.x, entity.y]:
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
