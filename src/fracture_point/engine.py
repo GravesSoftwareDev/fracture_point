@@ -111,7 +111,7 @@ class Engine:
                     continue
 
                 if event.sym == tcod.event.KeySym.U:
-                    self.unequip_weapon()
+                    self.unequip_slot("weapon")
                     continue
 
                 if event.sym in MOVE_KEYS:
@@ -125,18 +125,6 @@ class Engine:
         """No-op placeholder - see the note below the code block for why
         this exists and what to do about it."""
         pass
-
-    def handle_inventory_key(self, sym) -> None:
-        if sym not in NUMBER_KEYS:
-            return
-
-        index = NUMBER_KEYS[sym]
-        if index >= len(self.player.inventory.items):
-            return
-
-        item = self.player.inventory.items[index]
-        self.equip_item(item)
-        self.game_state = "playing"
 
     def try_pickup(self) -> bool:
         target = self.game_map.get_item_at(self.player.x, self.player.y)
@@ -153,33 +141,52 @@ class Engine:
         self.game_map.entities.remove(target)
         return True
 
-    def equip_item(self, item) -> None:
-        if item.slot != "weapon":
-            self.log.add(f"{item.name} can't be equipped yet.")
+    def handle_inventory_key(self, sym) -> None:
+        if sym not in NUMBER_KEYS:
             return
 
-        previous = self.player.equipment.equip_weapon(item)
+        index = NUMBER_KEYS[sym]
+        if index >= len(self.player.inventory.items):
+            return
+
+        item = self.player.inventory.items[index]
+        self.equip_item(item)
+        self.game_state = "playing"
+
+    def equip_item(self, item) -> None:
+        candidate_slots = self.player.equipment.empty_slots_for(item)
+
+        if not candidate_slots:
+            self.log.add(f"No open slot for {item.name}.")
+            return
+
+        # Multiple valid empty slots (e.g. both ring slots open, or a
+        # rare dual-eligible item): just take the first for now. A
+        # proper "choose which slot" prompt is a follow-up UI step -
+        # flagging this rather than silently deciding it's fine forever.
+        slot_id = candidate_slots[0]
+
+        previous = self.player.equipment.equip(item, slot_id)
         self.player.inventory.remove(item)
+
         if previous is not None:
             self.player.inventory.add(previous)
-            self.log.add(f"You equip {item.name}, stowing {previous.name}.")
+            self.log.add(f"You equip {item.name} ({slot_id}), stowing {previous.name}.")
         else:
-            self.log.add(f"You equip {item.name}.")
+            self.log.add(f"You equip {item.name} ({slot_id}).")
 
-    def unequip_weapon(self) -> None:
-        previous = self.player.equipment.unequip_weapon()
+    def unequip_slot(self, slot_id: str) -> None:
+        previous = self.player.equipment.unequip(slot_id)
         if previous is None:
-            self.log.add("You have no weapon equipped.")
+            self.log.add(f"Nothing equipped in {slot_id}.")
             return
 
         if not self.player.inventory.add(previous):
-            # Inventory full - re-equip rather than lose the item.
-            self.player.equipment.equip_weapon(previous)
+            self.player.equipment.equip(previous, slot_id)
             self.log.add("No room in your inventory to unequip that.")
             return
 
-        self.log.add(f"You unequip {previous.name}.")
-
+        self.log.add(f"You unequip {previous.name} ({slot_id}).")
     def player_action(self, dx: int, dy: int) -> bool:
         dest_x, dest_y = self.player.x + dx, self.player.y + dy
 
@@ -284,9 +291,8 @@ class Engine:
             console.print(x=x, y=y, text=hp_text, fg=(255, 255, 255))
         y += 1
 
-        weapon_name = self.player.equipment.weapon.name if self.player.equipment.weapon else "(none)"
+        weapon_name = self.player.equipment.equipped["weapon"].name if self.player.equipment.equipped["weapon"] else "(none)"
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
-        y += 1
 
         console.print(x=x, y=y, text="[i]nventory  [g]et  [u]nequip", fg=(120, 120, 120))
         y += 2

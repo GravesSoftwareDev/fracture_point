@@ -59,14 +59,21 @@ def main() -> None:
 
         # Drop a weapon in every other room, just so there's stuff to find.
         if i % 2 == 0:
-            item_x, item_y = room.x1 + 2, room.y1 + 2  # near a corner, not the center
+            item_x, item_y = room.x1 + 2, room.y1 + 2
             dagger = Entity(
                 x=item_x, y=item_y,
                 char="/", color=(200, 200, 100), name="Dagger",
-                item=Item(name="Dagger", char="/", color=(200, 200, 100), slot="weapon", power_bonus=2),
+                item=Item(name="Dagger", char="/", color=(200, 200, 100), slot_types=["weapon"], power_bonus=2),
             )
             game_map.entities.append(dagger)
 
+            ring_x, ring_y = room.x1 + 3, room.y1 + 2
+            ring = Entity(
+                x=ring_x, y=ring_y,
+                char="=", color=(220, 180, 60), name="Ring of Fortitude",
+                item=Item(name="Ring of Fortitude", char="=", color=(220, 180, 60), slot_types=["ring"], defense_bonus=1),
+            )
+            game_map.entities.append(ring)
     engine = Engine(game_map=game_map, player=player, sidebar_width=SIDEBAR_WIDTH)
 
     with tcod.context.new(
