@@ -13,11 +13,11 @@ from fracture_point.engine import Engine
 ASSETS_DIR = Path("assets")
 FONT_PATH = ASSETS_DIR / "IBM_Plex_Mono" / "IBMPlexMono-Regular.ttf"
 
-MAP_WIDTH = 60
-MAP_HEIGHT = 45
-SIDEBAR_WIDTH = 24
+MAP_WIDTH = 90
+MAP_HEIGHT = 55
+PANEL_WIDTH = 32
 
-SCREEN_WIDTH = MAP_WIDTH + 1 + SIDEBAR_WIDTH
+SCREEN_WIDTH = MAP_WIDTH + PANEL_WIDTH
 SCREEN_HEIGHT = MAP_HEIGHT
 
 TILE_WIDTH = 10
@@ -28,7 +28,7 @@ def main() -> None:
     tileset = tcod.tileset.load_truetype_font(str(FONT_PATH), TILE_WIDTH, TILE_HEIGHT)
 
     game_map, rooms = generate_dungeon(
-        MAP_WIDTH, MAP_HEIGHT, max_rooms=12, room_min_size=6, room_max_size=10
+        MAP_WIDTH, MAP_HEIGHT, max_rooms=18, room_min_size=6, room_max_size=10
     )
 
     player_x, player_y = rooms[0].center
@@ -57,7 +57,6 @@ def main() -> None:
         )
         game_map.entities.append(enemy)
 
-        # Drop a weapon in every other room, just so there's stuff to find.
         if i % 2 == 0:
             item_x, item_y = room.x1 + 2, room.y1 + 2
             dagger = Entity(
@@ -74,7 +73,8 @@ def main() -> None:
                 item=Item(name="Ring of Fortitude", char="=", color=(220, 180, 60), slot_types=["ring"], defense_bonus=1),
             )
             game_map.entities.append(ring)
-    engine = Engine(game_map=game_map, player=player, sidebar_width=SIDEBAR_WIDTH)
+
+    engine = Engine(game_map=game_map, player=player, panel_width=PANEL_WIDTH)
 
     with tcod.context.new(
         columns=SCREEN_WIDTH,

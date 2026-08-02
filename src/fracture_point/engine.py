@@ -15,23 +15,23 @@ FOV_RADIUS = 8
 
 
 class Engine:
-    def __init__(self, game_map: GameMap, player: Entity, sidebar_width: int = 24):
+    def __init__(self, game_map: GameMap, player: Entity, panel_width: int = 32):
         self.game_map = game_map
         self.player = player
         self.log = MessageLog()
 
-        self.sidebar_width = sidebar_width
-        self.border_x = self.game_map.width
-        self.sidebar_x = self.border_x + 1
+        # The map and side panel are now fully independent consoles,
+        # composited together in render(). This replaces the old
+        # shared-console-plus-manual-x-offset approach, and lets the
+        # panel draw its own frame/title so it reads as its own window.
+        self.map_console = tcod.console.Console(self.game_map.width, self.game_map.height, order="F")
+        self.panel_width = panel_width
+        self.panel_console = tcod.console.Console(panel_width, self.game_map.height, order="F")
 
         self.turn_queue = TurnQueue()
         for entity in self.game_map.entities:
             self.turn_queue.schedule(entity, 0)
 
-        # Register every known state and enter "playing" as the root
-        # of the graph. Future states (Hub, Crafting, etc.) get
-        # registered here too, with their links declared on the state
-        # classes themselves.
         self.states = StateManager()
         self.states.register(PlayingState(self))
         self.states.register(InventoryState(self))
@@ -62,14 +62,6 @@ class Engine:
             self.turn_queue.schedule(entity, time + cost)
 
     def await_player_turn(self, console: tcod.console.Console, context: tcod.context.Context) -> int:
-        """
-        Renders, waits for one event, and hands it to whichever state
-        is on top of the stack. Loops until an event actually ends the
-        player's turn (a real game action). Re-rendering every pass
-        means switching states (opening the inventory, closing it,
-        etc.) shows up immediately - this replaces the old
-        render-only-before-your-turn behavior.
-        """
         while True:
             self.render(console)
             context.present(console)
@@ -82,7 +74,7 @@ class Engine:
                 if cost is not None:
                     return cost
 
-                break  # re-render before waiting on the next event
+                break
 
     def try_pickup(self) -> bool:
         target = self.game_map.get_item_at(self.player.x, self.player.y)
@@ -106,11 +98,7 @@ class Engine:
             self.log.add(f"No open slot for {item.name}.")
             return
 
-        # Multiple valid empty slots (both rings open, or a rare
-        # dual-eligible item): just take the first for now. A proper
-        # "choose which slot" prompt is a follow-up UI step.
         slot_id = candidate_slots[0]
-
         previous = self.player.equipment.equip(item, slot_id)
         self.player.inventory.remove(item)
 
@@ -189,8 +177,20 @@ class Engine:
                     raise SystemExit()
 
     def render(self, console: tcod.console.Console) -> None:
+        """
+        Composites the map and panel consoles onto the actual screen
+        console. Each sub-console is cleared and redrawn by the current
+        state, then blitted side by side - map on the left, panel on
+        the right.
+        """
+        self.map_console.clear()
+        self.panel_console.clear()
+
+        self.states.current.render(self.map_console, self.panel_console)
+
         console.clear()
-        self.states.current.render(console)
+        self.map_console.blit(console, dest_x=0, dest_y=0)
+        self.panel_console.blit(console, dest_x=self.map_console.width, dest_y=0)
 
     def render_map(self, console: tcod.console.Console) -> None:
         gm = self.game_map
@@ -216,16 +216,13 @@ class Engine:
             if entity is not self.player and entity.fighter is None and entity.item is None:
                 console.print(x=entity.x, y=entity.y, text=entity.char, fg=entity.color)
 
-    def render_border(self, console: tcod.console.Console) -> None:
-        for y in range(console.height):
-            console.print(x=self.border_x, y=y, text="│", fg=(90, 90, 90))
-
     def render_sidebar(self, console: tcod.console.Console) -> None:
-        x = self.sidebar_x
-        y = 1
+        console.draw_frame(
+            x=0, y=0, width=console.width, height=console.height,
+            title="Fracture Point", fg=(180, 180, 180), bg=(0, 0, 0),
+        )
 
-        console.print(x=x, y=y, text="Fracture Point", fg=(255, 255, 255))
-        y += 2
+        x, y = 2, 2
 
         if self.player.fighter is not None:
             hp_text = f"HP: {self.player.fighter.hp}/{self.player.fighter.max_hp}"
@@ -237,27 +234,29 @@ class Engine:
         console.print(x=x, y=y, text=f"Weapon: {weapon_name}", fg=(180, 180, 220))
         y += 1
 
-        console.print(x=x, y=y, text="[i]nventory  [g]et  [u]nequip", fg=(120, 120, 120))
+        console.print(x=x, y=y, text="[i]nv  [g]et  [u]nequip", fg=(120, 120, 120))
         y += 2
 
         console.print(x=x, y=y, text="── Log ──", fg=(120, 120, 120))
         y += 1
 
+        content_width = console.width - 4  # inset from the frame on both sides
         wrapped_lines: list[str] = []
         for message in self.log.messages:
-            wrapped_lines.extend(textwrap.wrap(message, width=self.sidebar_width))
+            wrapped_lines.extend(textwrap.wrap(message, width=content_width))
 
-        max_lines = console.height - y - 1
+        max_lines = console.height - y - 2  # leave room for the frame's bottom edge
         for line in wrapped_lines[-max_lines:]:
             console.print(x=x, y=y, text=line, fg=(200, 200, 200))
             y += 1
 
     def render_inventory(self, console: tcod.console.Console) -> None:
-        x = self.sidebar_x
-        y = 1
+        console.draw_frame(
+            x=0, y=0, width=console.width, height=console.height,
+            title="Inventory", fg=(180, 180, 180), bg=(0, 0, 0),
+        )
 
-        console.print(x=x, y=y, text="Inventory", fg=(255, 255, 255))
-        y += 2
+        x, y = 2, 2
 
         if not self.player.inventory.items:
             console.print(x=x, y=y, text="(empty)", fg=(150, 150, 150))

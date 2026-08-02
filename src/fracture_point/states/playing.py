@@ -54,8 +54,6 @@ class PlayingState(GameState):
 
         return None
 
-    def render(self, console: tcod.console.Console) -> None:
-        engine = self.engine
-        engine.render_map(console)
-        engine.render_border(console)
-        engine.render_sidebar(console)
+    def render(self, map_console: tcod.console.Console, panel_console: tcod.console.Console) -> None:
+        self.engine.render_map(map_console)
+        self.engine.render_sidebar(panel_console)
