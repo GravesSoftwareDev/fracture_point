@@ -1,6 +1,6 @@
 from pathlib import Path
-import tcod
 import random
+import tcod
 
 from fracture_point.dungeon_generator import generate_dungeon
 from fracture_point.entity import Entity
@@ -10,6 +10,7 @@ from fracture_point.inventory import Inventory
 from fracture_point.item import Item
 from fracture_point.stats import Stats
 from fracture_point.engine import Engine
+from fracture_point import save_data
 
 ASSETS_DIR = Path("assets")
 FONT_PATH = ASSETS_DIR / "IBM_Plex_Mono" / "IBMPlexMono-Regular.ttf"
@@ -37,12 +38,25 @@ def main() -> None:
         stats=Stats(strength=14, dexterity=12, intelligence=10, vitality=14, wisdom=10, luck=10),
         base_power=3, base_defense=1, base_max_hp=6,
     )
+    player_equipment = Equipment(fighter=player_fighter)
+    player_inventory = Inventory(capacity=10)
+
+    # Restore gear that survived a previous escape, if any. Uses
+    # Equipment.equip() directly (bypassing empty_slots_for's "which
+    # slot should this go in" logic) since we already know the exact
+    # slot_id each item was saved under.
+    saved_equipped, saved_inventory_items = save_data.load_gear()
+    for slot_id, item in saved_equipped.items():
+        player_equipment.equip(item, slot_id)
+    for item in saved_inventory_items:
+        player_inventory.add(item)
+
     player = Entity(
         x=player_x, y=player_y,
         char="@", color=(255, 255, 255), name="Player", blocks_movement=True,
         fighter=player_fighter,
-        inventory=Inventory(capacity=10),
-        equipment=Equipment(fighter=player_fighter),
+        inventory=player_inventory,
+        equipment=player_equipment,
     )
     game_map.entities.append(player)
 
@@ -94,7 +108,7 @@ def main() -> None:
     ) as context:
         console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT, order="F")
         engine.run(console, context)
-    
+
 
 if __name__ == "__main__":
     main()

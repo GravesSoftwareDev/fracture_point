@@ -96,12 +96,19 @@ class Engine:
 
     def end_run(self, outcome: str) -> None:
         """Called once, exactly when a run stops (death or reaching the
-        stairs). Banks this run's gold into the persistent save and
-        moves to the terminal run_end state."""
+        stairs). Banks currency regardless of outcome. Gear is only
+        banked on a successful escape - death wipes any saved gear,
+        including gear that had persisted from an earlier escape."""
         self.run_outcome = outcome
         self.run_active = False
         self.final_currency = self.currency_at_start + self.gold_collected
         save_data.save_currency(self.final_currency)
+
+        if outcome == "escaped":
+            save_data.save_gear(self.player.equipment.equipped, self.player.inventory.items)
+        elif outcome == "died":
+            save_data.clear_gear()
+
         self.states.replace("run_end")
 
     def await_player_turn(self, console: tcod.console.Console, context: tcod.context.Context) -> int:
@@ -342,7 +349,8 @@ class Engine:
     def render_run_end(self, console: tcod.console.Console) -> None:
         title = "You Escaped" if self.run_outcome == "escaped" else "You Died"
         console.draw_frame(
-            x=0, y=0, width=console.width, height=console.height, fg=(180, 180, 180), bg=(0, 0, 0),
+            x=0, y=0, width=console.width, height=console.height,
+            title=title, fg=(180, 180, 180), bg=(0, 0, 0),
         )
 
         x, y = 2, 2
@@ -350,8 +358,13 @@ class Engine:
         y += 1
         console.print(x=x, y=y, text=f"Total gold banked: {self.final_currency}", fg=(230, 200, 80))
         y += 2
-        console.print(x=x, y=y, text="Your gear is lost.", fg=(150, 150, 150))
+
+        if self.run_outcome == "escaped":
+            console.print(x=x, y=y, text="Your gear is safe.", fg=(150, 220, 150))
+        else:
+            console.print(x=x, y=y, text="Your gear is lost.", fg=(220, 120, 120))
         y += 2
+
         console.print(x=x, y=y, text="Press any key to quit.", fg=(120, 120, 120))
         y += 1
         console.print(x=x, y=y, text="(No hub to return to yet!)", fg=(90, 90, 90))
