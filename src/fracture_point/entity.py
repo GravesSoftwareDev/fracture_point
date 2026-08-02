@@ -21,6 +21,7 @@ class Entity:
         item: Item | None = None,
         inventory: Inventory | None = None,
         equipment: Equipment | None = None,
+        perception_radius: int = 6,
     ):
         self.x = x
         self.y = y
@@ -32,6 +33,7 @@ class Entity:
         self.item = item
         self.inventory = inventory
         self.equipment = equipment
+        self.perception_radius = perception_radius
 
     def move(self, dx: int, dy: int) -> None:
         self.x += dx

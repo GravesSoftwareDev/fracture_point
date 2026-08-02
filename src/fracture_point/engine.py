@@ -10,6 +10,7 @@ from fracture_point.turn_queue import TurnQueue
 from fracture_point.states.state_manager import StateManager
 from fracture_point.states.playing import PlayingState
 from fracture_point.states.inventory import InventoryState
+from fracture_point.pathfinding import compute_path
 
 FOV_RADIUS = 8
 
@@ -136,12 +137,37 @@ class Engine:
         return False
 
     def take_enemy_action(self, entity: Entity) -> int:
+        """
+        Attack if adjacent. Otherwise, check whether this entity can
+        currently see the player (its own FOV, from its own position,
+        using its own perception_radius) - if so, path toward the
+        player. If not, fall back to the old random wander so
+        not-yet-aggroed enemies still feel alive rather than frozen.
+        """
         dist_x = abs(entity.x - self.player.x)
         dist_y = abs(entity.y - self.player.y)
         is_adjacent = dist_x <= 1 and dist_y <= 1 and (dist_x + dist_y) > 0
 
         if is_adjacent and self.player.fighter.is_alive:
             self.attack(entity, self.player)
+            return entity.fighter.action_cost
+
+        can_see_player = tcod.map.compute_fov(
+            transparency=self.game_map.tiles,
+            pov=(entity.x, entity.y),
+            radius=entity.perception_radius,
+        )[self.player.x, self.player.y]
+
+        if can_see_player:
+            path = compute_path(self.game_map, (entity.x, entity.y), (self.player.x, self.player.y))
+            if path:
+                next_x, next_y = path[0]
+                if self.game_map.is_walkable(next_x, next_y):
+                    entity.move(next_x - entity.x, next_y - entity.y)
+                # If the next path tile is blocked (another entity is
+                # standing there), the enemy just waits this turn rather
+                # than trying to path around - fine for now with small
+                # enemy counts; worth revisiting if enemies ever cluster.
         else:
             dx, dy = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0), (0, 0)])
             dest_x, dest_y = entity.x + dx, entity.y + dy
