@@ -1,5 +1,6 @@
 import random as r
 import tcod as t
+from core_classes import keybind_mapping
 
 from pathlib import Path
 
@@ -40,16 +41,19 @@ def render_all(
         console.print(x=screen_width//2 + cx, y = screen_height//2 + cy, text=f"▓", fg=( 255, 100, 255))     
 
 def handle_input(event: t.event.Event) -> dict[str, bool]:
-    quit = False
-    match event:
-            case t.event.Quit():
-                quit = True
-            case t.event.KeyDown(sym=t.event.KeySym.ESCAPE):
-                quit = True
-
-    if quit:
+    def do_quit():
         raise SystemExit()
-    
+
+    keybinds = [
+        keybind_mapping(t.event.Quit(), "event", do_quit),
+        keybind_mapping("ESCAPE", "keybind", do_quit)
+    ]
+
+    for keybind in keybinds:
+        if keybind.type == "event" and isinstance(event, type(keybind.event)):
+            keybind.action()
+        elif keybind.type == "keybind" and isinstance(event, t.event.KeyDown) and event.sym == t.event.KeySym[keybind.event]:
+            keybind.action()
 
 if __name__ == "__main__":
     main()
